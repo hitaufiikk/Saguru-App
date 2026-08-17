@@ -122,16 +122,24 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
     // 2. Fetch latest from Supabase
     async function loadFromSupabase() {
       const data = await studentService.getStudentsByClass(kelasCode)
-      if (isMountedFlag && data.length > 0) {
-        setStudents(
-          data.map((s, idx) => ({
-            noAbs: s.noAbs || (idx + 1),
-            nisn: s.nisn,
-            nama: s.nama,
-            gender: s.gender,
-            kontakOrtu: s.kontak_ortu || "-",
-          }))
-        )
+      if (isMountedFlag) {
+        const mapped = data.map((s, idx) => ({
+          noAbs: s.noAbs || (idx + 1),
+          nisn: s.nisn,
+          nama: s.nama,
+          gender: s.gender,
+          kontakOrtu: s.kontak_ortu || "-",
+        }))
+        setStudents(mapped)
+
+        // Sync with LocalStorage map
+        try {
+          const stored = localStorage.getItem("saguru_migrated_students")
+          const map = stored ? JSON.parse(stored) : {}
+          map[kelasCode?.toLowerCase()] = mapped
+          localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
+          window.dispatchEvent(new Event("saguru-data-updated"))
+        } catch (err) {}
       }
     }
     loadFromSupabase()
