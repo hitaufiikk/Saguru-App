@@ -112,6 +112,7 @@ const defaultStudents: StudentBase[] = [
 export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const router = useRouter()
   const [students, setStudents] = useState<StudentBase[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
   // Listen for data updates & fetch from Supabase
   useEffect(() => {
@@ -165,7 +166,12 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
             })
           }
         }
-      } catch (err) {}
+      } catch (err) {
+      } finally {
+        if (isMounted) {
+          setIsLoading(false)
+        }
+      }
     }
 
     const handleUpdate = () => {
@@ -729,7 +735,17 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
             </Table.Header>
 
             <Table.Body>
-              {mapelTasks.length === 0 ? (
+              {isLoading ? (
+                /* LOADING SKELETON STATE (Eliminates Initial Flash) */
+                <Table.Row>
+                  <Table.Cell colSpan={(isSelectionMode ? 7 : 6) + mapelTasks.length} className="h-64 text-center py-10">
+                    <div className="flex flex-col items-center justify-center space-y-3 max-w-sm mx-auto">
+                      <Loader2 className="h-7 w-7 text-primary animate-spin" />
+                      <p className="text-xs text-muted-foreground font-medium">Memuat data tugas & siswa...</p>
+                    </div>
+                  </Table.Cell>
+                </Table.Row>
+              ) : mapelTasks.length === 0 ? (
                 /* EMPTY STATE (0 Task Exists for Selected Mapel) */
                 <Table.Row>
                   <Table.Cell colSpan={6} className="h-64 text-center py-10">
@@ -770,7 +786,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                           Belum ada data siswa terdaftar di Kelas <strong className="text-foreground">{kelasCode.toUpperCase()}</strong>. Silakan migrasi data siswa terlebih dahulu.
                         </p>
                       </div>
-                      <Link href="/migrasi">
+                      <Link href="/migrasi-data">
                         <Button
                           size="sm"
                           className="h-8 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white gap-1.5 font-medium mt-1 cursor-pointer"
