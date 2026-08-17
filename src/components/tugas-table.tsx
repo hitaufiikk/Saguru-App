@@ -137,7 +137,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                   gender: s.gender,
                 }))
             )
-          } else if (kelasCode?.toLowerCase() === "9a") {
+          } else {
             setStudents(defaultStudents)
           }
           if (supTasks.length > 0) {
@@ -177,13 +177,13 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
         if (stored) {
           const map = JSON.parse(stored)
-          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
+          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()]) && map[kelasCode?.toLowerCase()].length > 0) {
             const classStudents: StudentBase[] = map[kelasCode?.toLowerCase()]
             setStudents(classStudents.filter((s) => !hiddenNisns.includes(s.nisn)))
-          } else if (kelasCode?.toLowerCase() === "9a") {
+          } else {
             setStudents(defaultStudents)
           }
-        } else if (kelasCode?.toLowerCase() === "9a") {
+        } else {
           setStudents(defaultStudents)
         }
       } catch (err) {}
@@ -294,14 +294,19 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
       .sort((a, b) => a.id - b.id)
   }, [tasks, selectedMapel, kelasCode])
 
+  // Effective Students with defaultStudents fallback
+  const effectiveStudents = useMemo(() => {
+    return students.length > 0 ? students : defaultStudents
+  }, [students])
+
   // Filtered Students
   const filteredStudents = useMemo(() => {
-    return students.filter(
+    return effectiveStudents.filter(
       (s) =>
         s.nama.toLowerCase().includes(searchQuery.toLowerCase()) ||
         s.nisn.includes(searchQuery)
     )
-  }, [students, searchQuery])
+  }, [effectiveStudents, searchQuery])
 
   const isAllSelected = filteredStudents.length > 0 && filteredStudents.every((s) => selectedNisns.includes(s.nisn))
 
