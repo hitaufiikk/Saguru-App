@@ -754,7 +754,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                     </div>
                   </Table.Cell>
                 </Table.Row>
-              ) : students.length === 0 ? (
+              ) : effectiveStudents.length === 0 ? (
                 /* NO STUDENTS REGISTERED YET */
                 <Table.Row>
                   <Table.Cell colSpan={(isSelectionMode ? 7 : 6) + mapelTasks.length} className="h-64 text-center py-10">
