@@ -518,7 +518,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     } catch (err) {}
 
     // Sync to Supabase
-    tugasService.saveGrade(task.id, student.nisn, kelasCode, parsedScore, inputStatus)
+    tugasService.saveGrade(task.id, student.nisn, kelasCode, parsedScore, inputStatus, selectedMapel)
 
     setGradeModalTarget(null)
   }

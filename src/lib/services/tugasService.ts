@@ -93,14 +93,15 @@ export const tugasService = {
     try {
       const { data, error } = await supabase
         .from("grades")
-        .select("task_id, nisn, score, status")
+        .select("task_id, nisn, score, status, mapel")
         .eq("kelas_code", kelasCode.toLowerCase())
 
       if (error) return {}
 
       const gradeMap: Record<string, { score: number | null; status: string }> = {}
       ;(data || []).forEach((row) => {
-        const key = `${row.nisn}_${kelasCode.toLowerCase()}_Matematika_${row.task_id}`
+        const subject = row.mapel || "Matematika"
+        const key = `${row.nisn}_${kelasCode.toLowerCase()}_${subject}_${row.task_id}`
         gradeMap[key] = {
           score: row.score !== null ? Number(row.score) : null,
           status: row.status || "BELUM",
@@ -119,7 +120,8 @@ export const tugasService = {
     nisn: string,
     kelasCode: string,
     score: number | null,
-    status: string
+    status: string,
+    mapel: string = "Matematika"
   ): Promise<boolean> {
     try {
       const { error } = await supabase.from("grades").upsert(
@@ -128,6 +130,7 @@ export const tugasService = {
             task_id: taskId,
             nisn,
             kelas_code: kelasCode.toLowerCase(),
+            mapel: mapel || "Matematika",
             score,
             status,
             updated_at: new Date().toISOString(),
