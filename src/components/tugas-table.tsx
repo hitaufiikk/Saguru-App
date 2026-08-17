@@ -141,18 +141,40 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
           } else {
             setStudents(defaultStudents)
           }
-          if (supTasks.length > 0) {
-            setTasks(
-              supTasks.map((t) => ({
-                id: t.id,
-                title: t.title,
-                mapel: t.mapel,
-                kelasCode: t.kelas_code,
-                deadline: "23:59 WIB",
-                maxScore: 100,
-              }))
-            )
+
+          // 2. Load and merge tasks from LocalStorage & Supabase
+          let localTasks: TaskDefinition[] = []
+          try {
+            const storedTasks = localStorage.getItem("saguru_tasks_list")
+            if (storedTasks) {
+              localTasks = JSON.parse(storedTasks)
+            }
+          } catch (err) {}
+
+          const supTasksMapped: TaskDefinition[] = (supTasks || []).map((t) => ({
+            id: t.id,
+            title: t.title,
+            mapel: t.mapel,
+            kelasCode: t.kelas_code,
+            deadline: "23:59 WIB",
+            maxScore: 100,
+          }))
+
+          const taskMap = new Map<string, TaskDefinition>()
+          localTasks.forEach((t) => {
+            const key = `${t.id}_${t.mapel}_${(t.kelasCode || kelasCode).toLowerCase()}`
+            taskMap.set(key, t)
+          })
+          supTasksMapped.forEach((t) => {
+            const key = `${t.id}_${t.mapel}_${(t.kelasCode || kelasCode).toLowerCase()}`
+            taskMap.set(key, t)
+          })
+
+          const mergedTasks = Array.from(taskMap.values())
+          if (mergedTasks.length > 0) {
+            setTasks(mergedTasks)
           }
+
           if (Object.keys(supGrades).length > 0) {
             setGrades((prev) => {
               const updated = { ...prev }
