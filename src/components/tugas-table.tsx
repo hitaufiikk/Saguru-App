@@ -495,7 +495,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   }
 
   // Save Quick Grade
-  const handleSaveGrade = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSaveGrade = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!gradeModalTarget) return
 
@@ -514,11 +514,10 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     setGrades(updatedGrades)
     try {
       localStorage.setItem("saguru_grades_matrix", JSON.stringify(updatedGrades))
-      window.dispatchEvent(new Event("saguru-tasks-updated"))
     } catch (err) {}
 
-    // Sync to Supabase
-    tugasService.saveGrade(task.id, student.nisn, kelasCode, parsedScore, inputStatus, selectedMapel)
+    // Sync to Supabase asynchronously
+    await tugasService.saveGrade(task.id, student.nisn, kelasCode, parsedScore, inputStatus, selectedMapel)
 
     setGradeModalTarget(null)
   }
