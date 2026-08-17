@@ -375,9 +375,9 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
   return (
     <div className="space-y-4">
       {/* Action Bar: Search & Buttons */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Search Input */}
-        <div className="relative w-72 sm:w-80">
+        <div className="relative w-full sm:w-72 md:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             type="search"
@@ -387,12 +387,12 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               setSearchQuery(e.target.value)
               setCurrentPage(1)
             }}
-            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border"
+            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border w-full"
           />
         </div>
 
         {/* Right Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end shrink-0">
           {/* Popover Tambah Siswa */}
           <Popover open={isAddOpen} onOpenChange={setIsAddOpen}>
             <PopoverTrigger render={

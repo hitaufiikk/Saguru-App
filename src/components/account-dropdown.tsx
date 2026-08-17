@@ -33,6 +33,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Camera, Image as ImageIcon, Upload, CheckCircle2, User, Settings, LogOut, Lock } from "lucide-react"
 
+import { profileService } from "@/lib/services/profileService"
+
 const DEFAULT_AVATAR = "https://avatars.githubusercontent.com/u/124599?v=4"
 const DEFAULT_WALLPAPER = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop"
 
@@ -52,6 +54,9 @@ export function AccountDropdown() {
   const wallpaperInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    let isMounted = true
+
+    // 1. Read LocalStorage first for instant render
     try {
       const savedAvatar = localStorage.getItem("saguru_avatar_photo")
       if (savedAvatar) setAvatarUrl(savedAvatar)
@@ -64,8 +69,29 @@ export function AccountDropdown() {
 
       const savedRole = localStorage.getItem("saguru_profile_role")
       if (savedRole) setRoleTitle(savedRole)
-    } catch (err) {
-      console.error("Gagal membaca profil dari localStorage:", err)
+    } catch (err) {}
+
+    // 2. Sync with Supabase so changes on HP instantly reflect on Desktop!
+    async function syncProfileFromSupabase() {
+      const supProfile = await profileService.getProfile()
+      if (supProfile && isMounted) {
+        setName(supProfile.name)
+        setRoleTitle(supProfile.roleTitle)
+        setAvatarUrl(supProfile.avatarUrl)
+        setWallpaperUrl(supProfile.wallpaperUrl)
+
+        try {
+          localStorage.setItem("saguru_profile_name", supProfile.name)
+          localStorage.setItem("saguru_profile_role", supProfile.roleTitle)
+          localStorage.setItem("saguru_avatar_photo", supProfile.avatarUrl)
+          localStorage.setItem("saguru_wallpaper_photo", supProfile.wallpaperUrl)
+        } catch (err) {}
+      }
+    }
+
+    syncProfileFromSupabase()
+    return () => {
+      isMounted = false
     }
   }, [])
 
@@ -91,9 +117,10 @@ export function AccountDropdown() {
           setAvatarUrl(b64)
           try {
             localStorage.setItem("saguru_avatar_photo", b64)
-          } catch (err) {
-            console.error("Gagal menyimpan foto avatar:", err)
-          }
+          } catch (err) {}
+
+          // Sync to Supabase
+          profileService.saveProfile({ avatarUrl: b64, name, roleTitle, wallpaperUrl })
         }
       }
       reader.readAsDataURL(file)
@@ -111,20 +138,25 @@ export function AccountDropdown() {
           setWallpaperUrl(b64)
           try {
             localStorage.setItem("saguru_wallpaper_photo", b64)
-          } catch (err) {
-            console.error("Gagal menyimpan wallpaper:", err)
-          }
+          } catch (err) {}
+
+          // Sync to Supabase
+          profileService.saveProfile({ wallpaperUrl: b64, name, roleTitle, avatarUrl })
         }
       }
       reader.readAsDataURL(file)
     }
   }
 
-  const handleSaveProfile = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSaveProfile = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     try {
       localStorage.setItem("saguru_profile_name", name)
       localStorage.setItem("saguru_profile_role", roleTitle)
+
+      // Sync to Supabase
+      await profileService.saveProfile({ name, roleTitle, avatarUrl, wallpaperUrl })
+
       setSaveSuccessMsg("Profil & Wallpaper berhasil diperbarui!")
       setTimeout(() => {
         setSaveSuccessMsg(null)

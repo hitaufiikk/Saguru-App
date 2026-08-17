@@ -579,7 +579,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         </div>
 
         {/* Right: Tambah Tugas & Export Buttons */}
-        <div className="flex items-center gap-2 justify-end shrink-0">
+        <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end shrink-0">
           {/* Popover Tambah Tugas Baru */}
           <Popover open={isAddTaskOpen} onOpenChange={setIsAddTaskOpen}>
             <PopoverTrigger render={
