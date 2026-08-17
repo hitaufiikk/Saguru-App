@@ -184,6 +184,9 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                   status: (supGrades[k].status || "BELUM") as TaskStatusType,
                 }
               })
+              try {
+                localStorage.setItem("saguru_grades_matrix", JSON.stringify(updated))
+              } catch (err) {}
               return updated
             })
           }
@@ -246,10 +249,13 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     setIsMounted(true)
     const handleTasksUpdate = () => {
       try {
-        const stored = localStorage.getItem("saguru_tasks_list")
-        if (stored) setTasks(JSON.parse(stored))
+        const storedTasks = localStorage.getItem("saguru_tasks_list")
+        if (storedTasks) setTasks(JSON.parse(storedTasks))
         const storedGrades = localStorage.getItem("saguru_grades_matrix")
-        if (storedGrades) setGrades(JSON.parse(storedGrades))
+        if (storedGrades) {
+          const parsed = JSON.parse(storedGrades)
+          setGrades((prev) => ({ ...parsed, ...prev }))
+        }
       } catch (err) {}
     }
     handleTasksUpdate()
