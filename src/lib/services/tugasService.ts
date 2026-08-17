@@ -124,20 +124,34 @@ export const tugasService = {
     mapel: string = "Matematika"
   ): Promise<boolean> {
     try {
-      const { error } = await supabase.from("grades").upsert(
-        [
-          {
-            task_id: taskId,
-            nisn,
-            kelas_code: kelasCode.toLowerCase(),
-            mapel: mapel || "Matematika",
-            score,
-            status,
-            updated_at: new Date().toISOString(),
-          },
-        ],
-        { onConflict: "task_id,nisn" }
-      )
+      const targetMapel = mapel || "Matematika"
+      const targetKelas = kelasCode.toLowerCase()
+
+      // 1. Clear existing record to guarantee conflict-free write
+      await supabase
+        .from("grades")
+        .delete()
+        .eq("task_id", taskId)
+        .eq("nisn", nisn)
+        .eq("kelas_code", targetKelas)
+        .eq("mapel", targetMapel)
+
+      // 2. Insert new grade record
+      const { error } = await supabase.from("grades").insert([
+        {
+          task_id: taskId,
+          nisn,
+          kelas_code: targetKelas,
+          mapel: targetMapel,
+          score,
+          status,
+          updated_at: new Date().toISOString(),
+        },
+      ])
+
+      if (error) {
+        console.warn("Supabase saveGrade warning:", error.message)
+      }
 
       return !error
     } catch (err) {
