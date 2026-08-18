@@ -193,4 +193,65 @@ export const tugasService = {
       return []
     }
   },
+
+  // Fetch freeform notes for binaan classes (9B, 8H, 8I)
+  async getBinaanNotes(kelasCode: string): Promise<Record<string, string>> {
+    try {
+      const { data, error } = await supabase
+        .from("grades")
+        .select("nisn, status")
+        .eq("kelas_code", kelasCode.toLowerCase())
+        .eq("task_id", 0)
+        .eq("mapel", "CatatanBinaan")
+
+      if (error) return {}
+
+      const noteMap: Record<string, string> = {}
+      ;(data || []).forEach((row) => {
+        if (row.nisn) {
+          noteMap[row.nisn] = row.status || ""
+        }
+      })
+      return noteMap
+    } catch (err) {
+      return {}
+    }
+  },
+
+  // Save freeform note for a student in binaan class
+  async saveBinaanNote(
+    nisn: string,
+    kelasCode: string,
+    note: string
+  ): Promise<boolean> {
+    try {
+      const targetKelas = kelasCode.toLowerCase()
+
+      // Delete existing note entry
+      await supabase
+        .from("grades")
+        .delete()
+        .eq("task_id", 0)
+        .eq("nisn", nisn)
+        .eq("kelas_code", targetKelas)
+        .eq("mapel", "CatatanBinaan")
+
+      // Insert new note if not empty
+      const { error } = await supabase.from("grades").insert([
+        {
+          task_id: 0,
+          nisn,
+          kelas_code: targetKelas,
+          mapel: "CatatanBinaan",
+          score: null,
+          status: note,
+          updated_at: new Date().toISOString(),
+        },
+      ])
+
+      return !error
+    } catch (err) {
+      return false
+    }
+  },
 }

@@ -743,3 +743,187 @@ export function exportJadwalToPDF(options: ExportJadwalOptions) {
     doc.save(filename)
   }
 }
+
+export interface StudentCatatanData {
+  noAbs: number
+  nisn: string
+  nama: string
+  gender: string
+  catatan: string
+}
+
+export interface ExportCatatanBinaanOptions {
+  students: StudentCatatanData[]
+  kelas: string
+  tahun?: string
+  waliKelas?: string
+}
+
+export async function generateCatatanBinaanExcelWorkbook(
+  options: ExportCatatanBinaanOptions
+): Promise<ExcelJS.Workbook> {
+  const { students, kelas, tahun = "2025/2026", waliKelas = "-" } = options
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet("Tagihan Catatan Siswa")
+
+  worksheet.columns = [
+    { key: "noAbs", width: 10 },
+    { key: "nisn", width: 18 },
+    { key: "nama", width: 35 },
+    { key: "gender", width: 8 },
+    { key: "catatan", width: 50 },
+  ]
+
+  // Row 1: Title
+  const r1 = worksheet.addRow(["DAFTAR TAGIHAN TUGAS & CATATAN SISWA"])
+  worksheet.mergeCells("A1:E1")
+  r1.font = { name: "Arial", size: 12, bold: true }
+  r1.alignment = { horizontal: "center", vertical: "middle" }
+
+  // Row 2: Subtitle
+  const r2 = worksheet.addRow([`TAHUN PELAJARAN ${tahun}`])
+  worksheet.mergeCells("A2:E2")
+  r2.font = { name: "Arial", size: 12, bold: true }
+  r2.alignment = { horizontal: "center", vertical: "middle" }
+
+  // Row 3: Blank
+  worksheet.addRow([])
+
+  // Row 4: Kelas & Wali
+  const r4 = worksheet.addRow([
+    `KELAS : ${kelas.toUpperCase()}`,
+    "",
+    "",
+    "",
+    `Wali Kelas : ${waliKelas}`,
+  ])
+  r4.font = { name: "Arial", size: 11 }
+  r4.getCell(5).alignment = { horizontal: "right" }
+
+  // Row 5: Header
+  const r5 = worksheet.addRow(["NO ABS", "NISN", "NAMA SISWA", "L/P", "CATATAN / TAGIHAN TUGAS"])
+  r5.font = { name: "Arial", size: 11, bold: true }
+  r5.alignment = { horizontal: "center", vertical: "middle" }
+
+  const thinBorder: Partial<ExcelJS.Borders> = {
+    top: { style: "thin" },
+    left: { style: "thin" },
+    bottom: { style: "thin" },
+    right: { style: "thin" },
+  }
+
+  for (let col = 1; col <= 5; col++) {
+    const cell = r5.getCell(col)
+    cell.border = thinBorder
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "F3F4F6" },
+    }
+  }
+
+  // Data rows
+  students.forEach((s) => {
+    const r = worksheet.addRow([
+      s.noAbs,
+      s.nisn,
+      s.nama.toUpperCase(),
+      s.gender === "Laki-laki" || s.gender === "L" ? "L" : "P",
+      s.catatan || "-",
+    ])
+    r.font = { name: "Arial", size: 10 }
+    r.getCell(1).alignment = { horizontal: "center", vertical: "top" }
+    r.getCell(2).alignment = { horizontal: "center", vertical: "top" }
+    r.getCell(3).alignment = { horizontal: "left", vertical: "top" }
+    r.getCell(4).alignment = { horizontal: "center", vertical: "top" }
+    r.getCell(5).alignment = { horizontal: "left", vertical: "top", wrapText: true }
+
+    for (let col = 1; col <= 5; col++) {
+      r.getCell(col).border = thinBorder
+    }
+  })
+
+  return workbook
+}
+
+export function generateCatatanBinaanPDFDoc(options: ExportCatatanBinaanOptions): jsPDF {
+  const { students, kelas, tahun = "2025/2026", waliKelas = "-" } = options
+  const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" })
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(14)
+  doc.text("DAFTAR TAGIHAN TUGAS & CATATAN SISWA", 105, 15, { align: "center" })
+
+  doc.setFontSize(11)
+  doc.text(`TAHUN PELAJARAN ${tahun}`, 105, 22, { align: "center" })
+
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(10)
+  doc.text(`KELAS : ${kelas.toUpperCase()}`, 14, 32)
+  doc.text(`Wali Kelas : ${waliKelas}`, 196, 32, { align: "right" })
+
+  autoTable(doc, {
+    startY: 38,
+    head: [["NO", "NISN", "NAMA SISWA", "L/P", "CATATAN / TAGIHAN TUGAS"]],
+    body: students.map((s) => [
+      s.noAbs,
+      s.nisn,
+      s.nama.toUpperCase(),
+      s.gender === "Laki-laki" || s.gender === "L" ? "L" : "P",
+      s.catatan || "-",
+    ]),
+    theme: "grid",
+    styles: {
+      font: "helvetica",
+      fontSize: 9,
+      cellPadding: 2.5,
+    },
+    headStyles: {
+      fillColor: [240, 240, 240],
+      textColor: [0, 0, 0],
+      fontStyle: "bold",
+      halign: "center",
+      lineWidth: 0.2,
+      lineColor: [100, 100, 100],
+    },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 12 },
+      1: { halign: "center", cellWidth: 28 },
+      2: { halign: "left", cellWidth: 50 },
+      3: { halign: "center", cellWidth: 14 },
+      4: { halign: "left", cellWidth: "auto" },
+    },
+  })
+
+  return doc
+}
+
+export async function exportCatatanBinaanToExcel(options: ExportCatatanBinaanOptions) {
+  const workbook = await generateCatatanBinaanExcelWorkbook(options)
+  const filename = `Tagihan_Tugas_Catatan_${options.kelas.toUpperCase()}.xlsx`
+
+  if (typeof window !== "undefined") {
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+}
+
+export function exportCatatanBinaanToPDF(options: ExportCatatanBinaanOptions) {
+  const doc = generateCatatanBinaanPDFDoc(options)
+  const filename = `Tagihan_Tugas_Catatan_${options.kelas.toUpperCase()}.pdf`
+
+  if (typeof window !== "undefined") {
+    doc.save(filename)
+  }
+}
+
