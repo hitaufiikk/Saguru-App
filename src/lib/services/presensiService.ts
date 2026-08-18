@@ -125,4 +125,48 @@ export const presensiService = {
       return []
     }
   },
+
+  // Fetch monthly presensi records for a class (e.g. year=2026, month=8 for August)
+  async getMonthlyPresensiByClass(
+    kelasCode: string,
+    year: number,
+    month: number
+  ): Promise<Record<string, Record<number, { status: string; alasanDispen: string }>>> {
+    try {
+      const mm = String(month).padStart(2, "0")
+      const daysInMonth = new Date(year, month, 0).getDate()
+      const startDate = `${year}-${mm}-01`
+      const endDate = `${year}-${mm}-${String(daysInMonth).padStart(2, "0")}`
+
+      const { data, error } = await supabase
+        .from("presensi")
+        .select("nisn, tanggal_presensi, status, alasan_dispen")
+        .eq("kelas_code", kelasCode.toLowerCase())
+        .gte("tanggal_presensi", startDate)
+        .lte("tanggal_presensi", endDate)
+
+      if (error || !data) return {}
+
+      const monthlyMap: Record<string, Record<number, { status: string; alasanDispen: string }>> = {}
+
+      data.forEach((row) => {
+        if (!row.nisn || !row.tanggal_presensi) return
+        const parts = row.tanggal_presensi.split("-")
+        if (parts.length === 3) {
+          const dayNum = parseInt(parts[2], 10)
+          if (!monthlyMap[row.nisn]) {
+            monthlyMap[row.nisn] = {}
+          }
+          monthlyMap[row.nisn][dayNum] = {
+            status: row.status || "HADIR",
+            alasanDispen: row.alasan_dispen || "",
+          }
+        }
+      })
+
+      return monthlyMap
+    } catch (err) {
+      return {}
+    }
+  },
 }

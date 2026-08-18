@@ -16,7 +16,6 @@ import {
   AlertCircle,
   Tag,
   Trash2,
-  Cloud,
   CloudOff,
   RefreshCw,
 } from "lucide-react"
@@ -463,7 +462,7 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
         </Card>
       </div>
 
-      {/* 3. Search & Sync Status */}
+      {/* 3. Search Bar */}
       <div className="flex items-center justify-between gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -476,11 +475,6 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
             }}
             className="pl-9 h-9 text-xs sm:text-sm bg-background"
           />
-        </div>
-
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Cloud className="h-4 w-4 text-emerald-500" />
-          <span className="hidden sm:inline">Sinkronisasi Cloud Supabase Aktif</span>
         </div>
       </div>
 
