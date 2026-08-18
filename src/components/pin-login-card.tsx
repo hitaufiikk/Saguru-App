@@ -12,6 +12,8 @@ import {
   REGEXP_ONLY_DIGITS,
 } from "@/components/ui/input-otp"
 
+import { supabase } from "@/lib/supabase"
+
 export function PinLoginCard() {
   const router = useRouter()
   const [pinInput, setPinInput] = useState("")
@@ -23,16 +25,41 @@ export function PinLoginCard() {
   const [isShaking, setIsShaking] = useState(false)
 
   useEffect(() => {
+    // Check remembered state first
     try {
-      // Selalu hapus status autentikasi aktif saat membuka halaman login agar guru WAJIB memasukkan PIN manual
-      localStorage.removeItem("saguru_is_authenticated")
+      const isRemembered = localStorage.getItem("saguru_remember_me") === "true"
+      const isAuth = localStorage.getItem("saguru_is_authenticated") === "true"
+      if (isRemembered && isAuth) {
+        router.push("/")
+        return
+      }
 
       const savedToken = localStorage.getItem("saguru_app_token")
       if (savedToken) setValidToken(savedToken)
+
+      // Fetch latest PIN from Supabase Cloud
+      async function fetchCloudPin() {
+        try {
+          const { data, error } = await supabase
+            .from("user_profile")
+            .select("pin_code")
+            .eq("id", "teacher_profile")
+            .maybeSingle()
+
+          if (!error && data?.pin_code) {
+            setValidToken(data.pin_code)
+            localStorage.setItem("saguru_app_token", data.pin_code)
+          }
+        } catch {
+          // fallback to local token
+        }
+      }
+
+      fetchCloudPin()
     } catch (err) {
       console.error("Gagal membaca token autentikasi:", err)
     }
-  }, [])
+  }, [router])
 
   const handlePinChange = (val: string) => {
     setPinInput(val)
@@ -40,20 +67,45 @@ export function PinLoginCard() {
     setIsShaking(false)
   }
 
-  const validateAndSubmit = (pinToValidate?: string) => {
+  const validateAndSubmit = async (pinToValidate?: string) => {
     const pin = typeof pinToValidate === "string" ? pinToValidate : pinInput
-    if (pin === validToken || pin === "123456") {
+
+    // Check against local or default
+    let isMatch = pin === validToken || pin === "123456"
+
+    // If not matching locally, check directly with Supabase Cloud
+    if (!isMatch) {
+      try {
+        const { data } = await supabase
+          .from("user_profile")
+          .select("pin_code")
+          .eq("id", "teacher_profile")
+          .maybeSingle()
+
+        if (data?.pin_code && data.pin_code === pin) {
+          isMatch = true
+          setValidToken(data.pin_code)
+          localStorage.setItem("saguru_app_token", data.pin_code)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (isMatch) {
       setIsSuccess(true)
       try {
         localStorage.setItem("saguru_is_authenticated", "true")
         if (rememberMe) {
           localStorage.setItem("saguru_remember_me", "true")
+        } else {
+          localStorage.removeItem("saguru_remember_me")
         }
       } catch {}
 
       setTimeout(() => {
         router.push("/")
-      }, 600)
+      }, 500)
     } else {
       setIsShaking(true)
       setErrorMsg("PIN Akses salah! Masukkan 6 digit PIN yang benar.")

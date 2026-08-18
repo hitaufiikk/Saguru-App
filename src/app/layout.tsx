@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BBB",
+  title: "SAGURU - Sistem Administrasi Guru",
   description: "Sistem Administrasi Guru (SAG)",
+  manifest: "/manifest.json",
   icons: {
     icon: "/icon.svg",
   },

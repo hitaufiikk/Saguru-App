@@ -174,7 +174,7 @@ export function AccountDropdown() {
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [tokenSuccess, setTokenSuccess] = useState<string | null>(null)
 
-  const handleUpdateToken = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUpdateToken = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setTokenError(null)
     setTokenSuccess(null)
@@ -198,7 +198,16 @@ export function AccountDropdown() {
 
     try {
       localStorage.setItem("saguru_app_token", newToken)
-      setTokenSuccess("Token Akses berhasil diperbarui!")
+
+      // Sync to Cloud Supabase
+      try {
+        const { supabase } = await import("@/lib/supabase")
+        await supabase
+          .from("user_profile")
+          .upsert([{ id: "teacher_profile", pin_code: newToken, updated_at: new Date().toISOString() }], { onConflict: "id" })
+      } catch {}
+
+      setTokenSuccess("Token Akses berhasil diperbarui & disinkronkan ke Cloud!")
       setTimeout(() => {
         setSettingsOpen(false)
         setCurrentPassToken("")

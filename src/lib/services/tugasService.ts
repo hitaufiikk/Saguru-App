@@ -197,28 +197,46 @@ export const tugasService = {
   // Fetch freeform notes for binaan classes (9B, 8H, 8I)
   async getBinaanNotes(kelasCode: string): Promise<Record<string, string>> {
     try {
+      const targetKelas = kelasCode.toLowerCase()
+      // Try fetching from binaan_notes table first
       const { data, error } = await supabase
+        .from("binaan_notes")
+        .select("nisn, catatan")
+        .eq("kelas_code", targetKelas)
+
+      if (!error && data) {
+        const noteMap: Record<string, string> = {}
+        data.forEach((row) => {
+          if (row.nisn) {
+            noteMap[row.nisn] = row.catatan || ""
+          }
+        })
+        return noteMap
+      }
+
+      // Fallback: Check grades table
+      const { data: gradesData, error: gradesError } = await supabase
         .from("grades")
         .select("nisn, status")
-        .eq("kelas_code", kelasCode.toLowerCase())
+        .eq("kelas_code", targetKelas)
         .eq("task_id", 0)
         .eq("mapel", "CatatanBinaan")
 
-      if (error) return {}
+      if (gradesError || !gradesData) return {}
 
-      const noteMap: Record<string, string> = {}
-      ;(data || []).forEach((row) => {
+      const fallbackMap: Record<string, string> = {}
+      gradesData.forEach((row) => {
         if (row.nisn) {
-          noteMap[row.nisn] = row.status || ""
+          fallbackMap[row.nisn] = row.status || ""
         }
       })
-      return noteMap
-    } catch (err) {
+      return fallbackMap
+    } catch {
       return {}
     }
   },
 
-  // Save freeform note for a student in binaan class
+  // Save freeform note for a student in binaan class (multi-device sync)
   async saveBinaanNote(
     nisn: string,
     kelasCode: string,
@@ -227,7 +245,26 @@ export const tugasService = {
     try {
       const targetKelas = kelasCode.toLowerCase()
 
-      // Delete existing note entry
+      // 1. Primary: Upsert into dedicated binaan_notes table
+      const { error: binaanError } = await supabase
+        .from("binaan_notes")
+        .upsert(
+          [
+            {
+              nisn,
+              kelas_code: targetKelas,
+              catatan: note,
+              updated_at: new Date().toISOString(),
+            },
+          ],
+          { onConflict: "nisn,kelas_code" }
+        )
+
+      if (!binaanError) {
+        return true
+      }
+
+      // 2. Fallback if binaan_notes table is pending schema creation
       await supabase
         .from("grades")
         .delete()
@@ -236,8 +273,7 @@ export const tugasService = {
         .eq("kelas_code", targetKelas)
         .eq("mapel", "CatatanBinaan")
 
-      // Insert new note if not empty
-      const { error } = await supabase.from("grades").insert([
+      const { error: gradeErr } = await supabase.from("grades").insert([
         {
           task_id: 0,
           nisn,
@@ -249,8 +285,8 @@ export const tugasService = {
         },
       ])
 
-      return !error
-    } catch (err) {
+      return !gradeErr
+    } catch {
       return false
     }
   },
