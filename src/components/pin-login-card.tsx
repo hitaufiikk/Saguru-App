@@ -24,12 +24,20 @@ export function PinLoginCard() {
   const [isSuccess, setIsSuccess] = useState(false)
   const [isShaking, setIsShaking] = useState(false)
 
+  const [isTimeoutNotice, setIsTimeoutNotice] = useState(false)
+
   useEffect(() => {
-    // Check remembered state first
+    // Check if redirected due to session timeout
+    if (typeof window !== "undefined" && window.location.search.includes("reason=timeout")) {
+      setIsTimeoutNotice(true)
+      localStorage.removeItem("saguru_remember_me")
+    }
+
+    // Check remembered state first (only if not timed out)
     try {
       const isRemembered = localStorage.getItem("saguru_remember_me") === "true"
       const isAuth = localStorage.getItem("saguru_is_authenticated") === "true"
-      if (isRemembered && isAuth) {
+      if (isRemembered && isAuth && !window.location.search.includes("reason=timeout")) {
         router.push("/")
         return
       }
@@ -96,6 +104,7 @@ export function PinLoginCard() {
       setIsSuccess(true)
       try {
         localStorage.setItem("saguru_is_authenticated", "true")
+        localStorage.setItem("saguru_last_activity", Date.now().toString())
         if (rememberMe) {
           localStorage.setItem("saguru_remember_me", "true")
         } else {
@@ -144,6 +153,17 @@ export function PinLoginCard() {
           Masukkan <strong className="text-foreground font-semibold">6 Digit PIN Akses</strong> Anda untuk membuka aplikasi.
         </p>
       </div>
+
+      {/* Timeout Alert Notice */}
+      {isTimeoutNotice && !errorMsg && !isSuccess && (
+        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-600 dark:text-amber-400 text-xs flex items-start gap-2.5 animate-in fade-in">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <div className="font-semibold">Sesi Berakhir (30 Menit)</div>
+            <div className="text-[11px] opacity-90">Tidak ada aktivitas selama 30 menit. Silakan masukkan PIN untuk melanjutkan.</div>
+          </div>
+        </div>
+      )}
 
       {/* Error Alert */}
       {errorMsg && !isSuccess && (
