@@ -10,7 +10,6 @@ import {
   FileText,
   Calendar,
   Database,
-  BookOpen,
   ChevronDown,
   ChevronRight,
   X,
@@ -27,7 +26,6 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -173,14 +171,9 @@ export function AppSidebar() {
               <GraduationCap className="h-5 w-5 stroke-[2.2]" />
             </div>
             <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-base tracking-tight text-sidebar-foreground">
-                  SAGURU
-                </span>
-                <span className="inline-flex items-center rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 ring-1 ring-blue-500/20">
-                  v1.0
-                </span>
-              </div>
+              <span className="font-extrabold text-base tracking-tight text-sidebar-foreground">
+                SAGURU
+              </span>
               <span className="text-[11px] text-muted-foreground font-medium">
                 Sistem Administrasi Guru
               </span>
@@ -207,7 +200,6 @@ export function AppSidebar() {
         {navGroups.map((group) => {
           const GroupIcon = group.icon
           const isOpen = openGroups[group.title] ?? true
-          const hasActiveChild = group.items.some((item) => pathname === item.href)
 
           return (
             <SidebarGroup key={group.title} className="p-0">
