@@ -17,8 +17,6 @@ import {
   DialogClose,
 } from "@/components/ui/dialog"
 
-import { bookService } from "@/lib/services/bookService"
-
 export interface DigitalBook {
   id: string
   title: string
@@ -48,32 +46,6 @@ export default function PerpustakaanPage() {
     return []
   })
   const [toastMessage, setToastMessage] = useState<string | null>(null)
-
-  // Load books from Supabase on mount
-  useEffect(() => {
-    let isMounted = true
-    async function loadBooks() {
-      try {
-        const supBooks = await bookService.getBooks()
-        if (isMounted && supBooks.length > 0) {
-          setBooks((prev) => {
-            const map = new Map<string, DigitalBook>()
-            prev.forEach((b) => map.set(b.id, b))
-            supBooks.forEach((b) => map.set(b.id, b))
-            const merged = Array.from(map.values())
-            try {
-              localStorage.setItem("saguru_digital_books_v5", JSON.stringify(merged))
-            } catch (err) {}
-            return merged
-          })
-        }
-      } catch (err) {}
-    }
-    loadBooks()
-    return () => {
-      isMounted = false
-    }
-  }, [])
 
   // Upload Dialog State (Shadcn UI Modal)
   const [isUploadOpen, setIsUploadOpen] = useState(false)
@@ -213,7 +185,7 @@ export default function PerpustakaanPage() {
   }
 
   // Submit Upload Dialog
-  const handleSaveUpload = async (e: React.FormEvent) => {
+  const handleSaveUpload = (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedFile || !fileTitle || !pdfDataUrl) return
 
@@ -233,9 +205,6 @@ export default function PerpustakaanPage() {
     const updated = [newBook, ...books]
     saveBooksToStorage(updated)
     setToastMessage(`Berhasil mengunggah buku digital "${fileTitle}"`)
-
-    // Save to Supabase asynchronously
-    await bookService.addBook(newBook)
 
     // Reset state & close dialog
     setIsUploadOpen(false)

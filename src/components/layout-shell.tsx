@@ -8,8 +8,8 @@ import { AccountDropdown } from "@/components/account-dropdown"
 import { ModeToggle } from "@/components/mode-toggle"
 import { BrandLink } from "@/components/brand-link"
 import { Footer } from "@/components/footer"
-
-const IDLE_TIMEOUT_MS = 30 * 60 * 1000 // 30 Menit
+import { SidebarProvider } from "@/components/ui/sidebar"
+import { AppSidebar } from "@/components/app-sidebar"
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -17,7 +17,6 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const isLoginPage = pathname === "/login"
   const [isAuthenticated, setIsAuthenticated] = React.useState<boolean | null>(null)
 
-  // 1. Session & Idle Activity Check
   React.useEffect(() => {
     // Clear initial mock student data for testing stage
     try {
@@ -38,79 +37,17 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       return
     }
 
-    // Check Authentication & Timeout
-    const checkAuthStatus = () => {
-      try {
-        const auth = localStorage.getItem("saguru_is_authenticated")
-        const lastActivityStr = localStorage.getItem("saguru_last_activity")
-        const now = Date.now()
-
-        if (auth !== "true") {
-          setIsAuthenticated(false)
-          router.push("/login")
-          return
-        }
-
-        // Check if 30 minutes of inactivity has passed
-        if (lastActivityStr) {
-          const lastActivity = Number(lastActivityStr)
-          if (!isNaN(lastActivity) && now - lastActivity > IDLE_TIMEOUT_MS) {
-            // Sesi kedaluwarsa karena tidak ada aktivitas selama 30 menit
-            localStorage.removeItem("saguru_is_authenticated")
-            localStorage.removeItem("saguru_last_activity")
-            setIsAuthenticated(false)
-            router.push("/login?reason=timeout")
-            return
-          }
-        }
-
-        // Sesi aktif
+    try {
+      const auth = localStorage.getItem("saguru_is_authenticated")
+      if (auth === "true") {
         setIsAuthenticated(true)
-        if (!lastActivityStr) {
-          localStorage.setItem("saguru_last_activity", now.toString())
-        }
-      } catch (err) {
+      } else {
         setIsAuthenticated(false)
         router.push("/login")
       }
-    }
-
-    checkAuthStatus()
-
-    // Activity tracking listener (throttled)
-    let lastRecorded = Date.now()
-    const handleUserActivity = () => {
-      const now = Date.now()
-      if (now - lastRecorded > 5000) { // Update paling cepat setiap 5 detik
-        lastRecorded = now
-        try {
-          if (localStorage.getItem("saguru_is_authenticated") === "true") {
-            localStorage.setItem("saguru_last_activity", now.toString())
-          }
-        } catch {}
-      }
-    }
-
-    const activityEvents = ["mousemove", "mousedown", "keydown", "touchstart", "scroll", "click"]
-    activityEvents.forEach((evt) => {
-      window.addEventListener(evt, handleUserActivity, { passive: true })
-    })
-
-    // Interval checker every 15 seconds & on tab visibility change
-    const intervalId = setInterval(checkAuthStatus, 15000)
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        checkAuthStatus()
-      }
-    }
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-
-    return () => {
-      activityEvents.forEach((evt) => {
-        window.removeEventListener(evt, handleUserActivity)
-      })
-      clearInterval(intervalId)
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    } catch (err) {
+      setIsAuthenticated(false)
+      router.push("/login")
     }
   }, [pathname, isLoginPage, router])
 
@@ -140,27 +77,32 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       enableSystem
       disableTransitionOnChange
     >
-      <header className="sticky top-0 z-50 w-full border-b border-blue-400/30 bg-[#4274D9] text-white dark:bg-[#0F172A] dark:text-[#60A5FA] dark:border-[#1E293B] backdrop-blur-md px-4 sm:px-6 py-3 flex items-center justify-between transition-colors duration-200">
-        {/* Desktop Left Brand "SAGURU" */}
-        <div className="hidden lg:flex items-center">
-          <BrandLink />
+      <SidebarProvider defaultOpen={false}>
+        <AppSidebar />
+        <div className="flex-1 flex flex-col min-h-screen w-full">
+          <header className="sticky top-0 z-50 w-full border-b border-blue-400/30 bg-[#4274D9] text-white dark:bg-[#0F172A] dark:text-[#60A5FA] dark:border-[#1E293B] backdrop-blur-md px-4 sm:px-6 py-3 flex items-center justify-between transition-colors duration-200">
+            {/* Desktop Left Brand "SAGURU" */}
+            <div className="hidden lg:flex items-center">
+              <BrandLink />
+            </div>
+
+            {/* Navigation Menu (Center desktop menu & Mobile trigger + Mobile center brand) */}
+            <div className="flex-1 flex items-center justify-between lg:justify-center">
+              <NavigationMenuDemo />
+            </div>
+
+            {/* Right Controls */}
+            <div className="flex items-center gap-3 shrink-0">
+              <ModeToggle />
+              <AccountDropdown />
+            </div>
+          </header>
+
+          <main className="flex-1 font-sans">{children}</main>
+
+          <Footer />
         </div>
-
-        {/* Navigation Menu (Center desktop menu & Mobile trigger + Mobile center brand) */}
-        <div className="flex-1 flex items-center justify-between lg:justify-center">
-          <NavigationMenuDemo />
-        </div>
-
-        {/* Right Controls */}
-        <div className="flex items-center gap-3 shrink-0">
-          <ModeToggle />
-          <AccountDropdown />
-        </div>
-      </header>
-
-      <div className="flex-1 font-sans">{children}</div>
-
-      <Footer />
+      </SidebarProvider>
     </ThemeProvider>
   )
 }

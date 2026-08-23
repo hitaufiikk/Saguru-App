@@ -41,7 +41,6 @@ import {
   getFormattedCurrentDate,
   getFormattedCurrentDateTime,
 } from "@/lib/export-utils"
-import { studentService } from "@/lib/services/studentService"
 
 export interface StudentItem {
   noAbs: number
@@ -71,7 +70,22 @@ const DEFAULT_9A_STUDENTS: StudentItem[] = [
 
 export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const router = useRouter()
-  const [students, setStudents] = useState<StudentItem[]>([])
+  const [students, setStudents] = useState<StudentItem[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("saguru_migrated_students")
+        if (stored) {
+          const map = JSON.parse(stored)
+          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
+            return map[kelasCode?.toLowerCase()]
+          }
+        }
+      } catch (err) {
+        console.error("Error reading localStorage:", err)
+      }
+    }
+    return []
+  })
 
   const [searchQuery, setSearchQuery] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
@@ -99,70 +113,29 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
 
   // Multi-select & Bulk Delete State
   const [isSelectionMode, setIsSelectionMode] = useState(false)
-  const [selectedNisns, setSelectedNisns] = useState<string[]>([])
+  const [selectedNisns, setSelectedNisns] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(storageKey)
+        if (stored) return JSON.parse(stored)
+      } catch (err) {}
+    }
+    return []
+  })
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
-  const [isMounted, setIsMounted] = useState(false)
-
-  // Sync students from localStorage & Supabase on mount and kelasCode change
-  useEffect(() => {
-    setIsMounted(true)
-    let isMountedFlag = true
-
-    // 1. First load from LocalStorage for instant SSR-safe render
-    try {
-      const stored = localStorage.getItem("saguru_migrated_students")
-      if (stored) {
-        const map = JSON.parse(stored)
-        if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
-          setStudents(map[kelasCode?.toLowerCase()])
-        }
-      }
-    } catch (err) {}
-
-    // 2. Fetch latest from Supabase
-    async function loadFromSupabase() {
-      const data = await studentService.getStudentsByClass(kelasCode)
-      if (isMountedFlag) {
-        const mapped = data.map((s, idx) => ({
-          noAbs: s.noAbs || (idx + 1),
-          nisn: s.nisn,
-          nama: s.nama,
-          gender: s.gender,
-          kontakOrtu: s.kontak_ortu || "-",
-        }))
-        setStudents(mapped)
-
-        // Sync with LocalStorage map
-        try {
-          const stored = localStorage.getItem("saguru_migrated_students")
-          const map = stored ? JSON.parse(stored) : {}
-          map[kelasCode?.toLowerCase()] = mapped
-          localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
-          window.dispatchEvent(new Event("saguru-data-updated"))
-        } catch (err) {}
-      }
-    }
-    loadFromSupabase()
-    return () => {
-      isMountedFlag = false
-    }
-  }, [kelasCode])
 
   // Load selection when kelasCode changes
   useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        const stored = localStorage.getItem(storageKey)
-        if (stored) {
-          setSelectedNisns(JSON.parse(stored))
-        } else {
-          setSelectedNisns([])
-        }
-      } catch (err) {
+    try {
+      const stored = localStorage.getItem(storageKey)
+      if (stored) {
+        setSelectedNisns(JSON.parse(stored))
+      } else {
         setSelectedNisns([])
       }
-    }, 0)
-    return () => clearTimeout(timer)
+    } catch (err) {
+      setSelectedNisns([])
+    }
   }, [kelasCode, storageKey])
 
   const saveSelectedNisns = (newSelected: string[]) => {
@@ -208,9 +181,6 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err) {}
 
-    // Sync deletes to Supabase
-    selectedNisns.forEach((id) => studentService.deleteStudent(id))
-
     saveSelectedNisns([])
     setIsBulkDeleteOpen(false)
     setIsSelectionMode(false)
@@ -222,19 +192,13 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
   const [exportWaliKelas, setExportWaliKelas] = useState("Devy, S.Pd.")
   const [exportKelas, setExportKelas] = useState(`Kelas ${kelasCode.toUpperCase()}`)
   const [exportTahun, setExportTahun] = useState("2026/2027")
-  const [exportTanggal, setExportTanggal] = useState<string>("")
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        const storedDate = localStorage.getItem(`saguru_presensi_date_${kelasCode.toLowerCase()}`)
-        setExportTanggal(storedDate || getFormattedCurrentDate())
-      } catch (err) {
-        setExportTanggal(getFormattedCurrentDate())
-      }
-    }, 0)
-    return () => clearTimeout(timer)
-  }, [kelasCode])
+  const [exportTanggal, setExportTanggal] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const storedDate = localStorage.getItem(`saguru_presensi_date_${kelasCode.toLowerCase()}`)
+      if (storedDate) return storedDate
+    }
+    return getFormattedCurrentDate()
+  })
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / itemsPerPage))
@@ -265,14 +229,6 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
       window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err) {}
-
-    // Sync to Supabase
-    studentService.addStudent({
-      nisn: newStudent.nisn,
-      nama: newStudent.nama,
-      gender: newStudent.gender,
-      kelas_code: kelasCode,
-    })
 
     setAddNama("")
     setAddNisn("")
@@ -314,13 +270,6 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err) {}
 
-    // Sync to Supabase
-    studentService.updateStudent(editingStudent.nisn, {
-      nisn: editNisn.trim(),
-      nama: editNama.trim(),
-      gender: editGender === "cowok" ? "Laki-laki" : "Perempuan",
-    })
-
     setEditingStudent(null)
   }
 
@@ -338,9 +287,6 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
       window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err) {}
-
-    // Sync delete to Supabase
-    studentService.deleteStudent(deletingStudent.nisn)
 
     setDeletingStudent(null)
   }
@@ -383,9 +329,9 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
   return (
     <div className="space-y-4">
       {/* Action Bar: Search & Buttons */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-4">
         {/* Search Input */}
-        <div className="relative w-full sm:w-72 md:w-80">
+        <div className="relative w-72 sm:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             type="search"
@@ -395,12 +341,12 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               setSearchQuery(e.target.value)
               setCurrentPage(1)
             }}
-            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border w-full"
+            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border"
           />
         </div>
 
         {/* Right Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end shrink-0">
+        <div className="flex items-center gap-2">
           {/* Popover Tambah Siswa */}
           <Popover open={isAddOpen} onOpenChange={setIsAddOpen}>
             <PopoverTrigger render={
@@ -487,7 +433,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               size="sm"
               className="h-9 px-3 text-xs sm:text-sm gap-1.5 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer font-medium"
               onClick={() => setIsSelectionMode(true)}
-              disabled={!isMounted || students.length === 0}
+              disabled={students.length === 0}
             >
               <Trash2 className="h-4 w-4" />
               <span>Hapus Data</span>
@@ -523,7 +469,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
             variant="outline"
             className="h-9 px-3 text-xs sm:text-sm gap-2 cursor-pointer border-border hover:bg-accent"
             onClick={() => setIsExportOpen(true)}
-            disabled={!isMounted || students.length === 0}
+            disabled={students.length === 0}
           >
             <Download className="h-4 w-4" />
             <span>Export</span>
@@ -550,7 +496,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               )}
               <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
               <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
-              <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
+              <Table.Column className="text-foreground font-semibold">Nama</Table.Column>
               <Table.Column className="text-foreground font-semibold">L/P</Table.Column>
               <Table.Column className="text-foreground font-semibold">Kontak Ortu</Table.Column>
               <Table.Column className="text-foreground font-semibold text-center">Aksi</Table.Column>

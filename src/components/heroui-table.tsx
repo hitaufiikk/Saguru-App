@@ -44,14 +44,9 @@ import {
 import {
   exportToExcel,
   exportToPDF,
-  exportMonthlyPresensiToExcel,
-  exportMonthlyPresensiToPDF,
   getFormattedCurrentDate,
   getFormattedCurrentDateTime,
 } from "@/lib/export-utils"
-import { getLiburIndonesia } from "@/lib/data-jadwal"
-import { studentService } from "@/lib/services/studentService"
-import { presensiService } from "@/lib/services/presensiService"
 
 export interface StudentItem {
   noAbs: number
@@ -135,40 +130,32 @@ const getValidAttendanceStatus = (status?: string): string => {
 }
 
 export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
-  const [students, setStudents] = useState<StudentItem[]>([])
-  const [isMounted, setIsMounted] = useState(false)
-
-  // Listen for data updates & fetch from Supabase
-  useEffect(() => {
-    setIsMounted(true)
-    let isMountedFlag = true
-    async function loadFromSupabase() {
+  const [students, setStudents] = useState<StudentItem[]>(() => {
+    if (typeof window !== "undefined") {
       try {
-        const [supabaseStudents, supabasePresensi, supabaseExclusions] = await Promise.all([
-          studentService.getStudentsByClass(kelasCode),
-          presensiService.getPresensiByClass(kelasCode),
-          presensiService.getPresensiExclusions(kelasCode),
-        ])
+        const stored = localStorage.getItem("saguru_migrated_students")
+        const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
+        const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
+        const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
 
-        if (isMountedFlag && supabaseStudents.length > 0) {
-          const merged: StudentItem[] = supabaseStudents
-            .filter((s) => !supabaseExclusions.includes(s.nisn))
-            .map((s, idx) => {
-              const p = supabasePresensi[s.nisn]
-              return {
-                noAbs: s.noAbs || (idx + 1),
-                nisn: s.nisn,
-                nama: s.nama,
-                gender: s.gender,
-                status: p ? getValidAttendanceStatus(p.status) : getValidAttendanceStatus(s.status),
-                alasanDispen: p ? p.alasanDispen : "",
-              }
-            })
-          setStudents(merged)
+        if (stored) {
+          const map = JSON.parse(stored)
+          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
+            const classStudents: StudentItem[] = map[kelasCode?.toLowerCase()]
+            return classStudents
+              .filter((s) => !hiddenNisns.includes(s.nisn))
+              .map((s) => ({ ...s, status: getValidAttendanceStatus(s.status) }))
+          }
         }
-      } catch (err) {}
+      } catch (err) {
+        console.error("Error reading localStorage:", err)
+      }
     }
+    return []
+  })
 
+  // Listen for data updates
+  useEffect(() => {
     const handleUpdate = () => {
       try {
         const stored = localStorage.getItem("saguru_migrated_students")
@@ -185,18 +172,15 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                 .filter((s) => !hiddenNisns.includes(s.nisn))
                 .map((s) => ({ ...s, status: getValidAttendanceStatus(s.status) }))
             )
+            return
           }
         }
+        setStudents([])
       } catch (err) {}
-      loadFromSupabase()
     }
-
     handleUpdate()
     window.addEventListener("saguru-data-updated", handleUpdate)
-    return () => {
-      isMountedFlag = false
-      window.removeEventListener("saguru-data-updated", handleUpdate)
-    }
+    return () => window.removeEventListener("saguru-data-updated", handleUpdate)
   }, [kelasCode])
 
   const [searchQuery, setSearchQuery] = useState("")
@@ -225,24 +209,29 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
   // Multi-select & Bulk Delete State
   const [isSelectionMode, setIsSelectionMode] = useState(false)
-  const [selectedNisns, setSelectedNisns] = useState<string[]>([])
+  const [selectedNisns, setSelectedNisns] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(storageKey)
+        if (stored) return JSON.parse(stored)
+      } catch (err) {}
+    }
+    return []
+  })
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
 
   // Load selection when kelasCode changes
   useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        const stored = localStorage.getItem(storageKey)
-        if (stored) {
-          setSelectedNisns(JSON.parse(stored))
-        } else {
-          setSelectedNisns([])
-        }
-      } catch (err) {
+    try {
+      const stored = localStorage.getItem(storageKey)
+      if (stored) {
+        setSelectedNisns(JSON.parse(stored))
+      } else {
         setSelectedNisns([])
       }
-    }, 0)
-    return () => clearTimeout(timer)
+    } catch (err) {
+      setSelectedNisns([])
+    }
   }, [kelasCode, storageKey])
 
   const saveSelectedNisns = (newSelected: string[]) => {
@@ -288,10 +277,6 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
       localStorage.removeItem(storageKey)
     } catch (err) {}
-
-    // Sync exclusions to Supabase
-    selectedNisns.forEach((id) => presensiService.addPresensiExclusion(id, kelasCode))
-
     saveSelectedNisns([])
     setIsBulkDeleteOpen(false)
     setIsSelectionMode(false)
@@ -336,23 +321,11 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     )
     setStudents(updated)
     syncToLocalStorage(updated)
-
-    // Sync to Supabase
-    presensiService.updateAttendance(
-      dispenStudent.nisn,
-      kelasCode,
-      "DISPEN",
-      dispenAlasan.trim(),
-      undefined,
-      dispenStudent.nama
-    )
-
     setDispenStudent(null)
     setDispenAlasan("")
   }
 
   const handleSetStatus = (nisn: string, newStatus: string) => {
-    const targetStudent = students.find((s) => s.nisn === nisn)
     const updated = students.map((s) =>
       s.nisn === nisn
         ? {
@@ -364,40 +337,21 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     )
     setStudents(updated)
     syncToLocalStorage(updated)
-
-    // Sync to Supabase
-    presensiService.updateAttendance(
-      nisn,
-      kelasCode,
-      newStatus,
-      undefined,
-      undefined,
-      targetStudent?.nama
-    )
   }
 
   // State Dialog Export Data
   const [isExportOpen, setIsExportOpen] = useState(false)
-  const [exportType, setExportType] = useState<"monthly" | "daily">("monthly")
   const [exportFormat, setExportFormat] = useState<"pdf" | "excel">("pdf")
-  const [exportBulan, setExportBulan] = useState<number>(new Date().getMonth() + 1)
-  const [exportTahunNum, setExportTahunNum] = useState<number>(new Date().getFullYear())
   const [exportWaliKelas, setExportWaliKelas] = useState("Devy, S.Pd.")
   const [exportKelas, setExportKelas] = useState(`Kelas ${kelasCode.toUpperCase()}`)
-  const [exportTahun, setExportTahun] = useState("2025/2026")
-  const [exportTanggal, setExportTanggal] = useState<string>("")
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        const storedDate = localStorage.getItem(`saguru_presensi_date_${kelasCode.toLowerCase()}`)
-        setExportTanggal(storedDate || getFormattedCurrentDate())
-      } catch (err) {
-        setExportTanggal(getFormattedCurrentDate())
-      }
-    }, 0)
-    return () => clearTimeout(timer)
-  }, [kelasCode])
+  const [exportTahun, setExportTahun] = useState("2026/2027")
+  const [exportTanggal, setExportTanggal] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const storedDate = localStorage.getItem(`saguru_presensi_date_${kelasCode.toLowerCase()}`)
+      if (storedDate) return storedDate
+    }
+    return getFormattedCurrentDate()
+  })
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / itemsPerPage))
@@ -465,112 +419,30 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
   const handleExportSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    const formatLabel = exportFormat === "pdf" ? "PDF Landscape" : "Excel (.xlsx)"
+    const formatLabel = exportFormat === "pdf" ? "PDF" : "Excel (.xlsx)"
     setToastMessage(`Mengunduh file ${formatLabel} untuk ${exportKelas}...`)
 
     const currentExportTime = getFormattedCurrentDateTime()
 
     try {
-      if (exportType === "monthly") {
-        // 1. Fetch Monthly Records from Supabase
-        const monthlyRecords = await presensiService.getMonthlyPresensiByClass(
-          kelasCode,
-          exportTahunNum,
-          exportBulan
-        )
-
-        const daysInMonth = new Date(exportTahunNum, exportBulan, 0).getDate()
-        const today = new Date()
-
-        const monthlyStudentList = students.map((s) => {
-          const dailyStatus: Record<number, string> = {}
-          let h = 0, sc = 0, iz = 0, al = 0, dp = 0
-
-          for (let day = 1; day <= daysInMonth; day++) {
-            const dateObj = new Date(exportTahunNum, exportBulan - 1, day)
-            const isSunday = dateObj.getDay() === 0
-            const holiday = getLiburIndonesia(dateObj)
-            const rec = monthlyRecords[s.nisn]?.[day]
-
-            let st = "-"
-            if (isSunday || holiday) {
-              st = "-"
-            } else if (rec) {
-              st = rec.status
-            } else if (
-              day === today.getDate() &&
-              exportBulan === today.getMonth() + 1 &&
-              exportTahunNum === today.getFullYear()
-            ) {
-              st = s.status || "HADIR"
-            }
-
-            dailyStatus[day] = st
-            if (st === "HADIR") h++
-            else if (st === "SAKIT") sc++
-            else if (st === "IZIN") iz++
-            else if (st === "ALPHA") al++
-            else if (st === "DISPEN") dp++
-          }
-
-          const effectiveDays = Object.values(dailyStatus).filter((st) => st !== "-").length
-          const percentage = effectiveDays > 0 ? Math.round(((h + dp) / effectiveDays) * 100) : 100
-
-          return {
-            noAbs: s.noAbs,
-            nisn: s.nisn,
-            nama: s.nama,
-            gender: s.gender,
-            dailyStatus,
-            totalHadir: h,
-            totalSakit: sc,
-            totalIzin: iz,
-            totalAlpha: al,
-            totalDispen: dp,
-            percentage,
-          }
+      if (exportFormat === "excel") {
+        await exportToExcel({
+          students,
+          kelas: exportKelas,
+          tahun: exportTahun,
+          waliKelas: exportWaliKelas,
+          tanggal: exportTanggal,
+          tanggalExport: currentExportTime,
         })
-
-        if (exportFormat === "excel") {
-          await exportMonthlyPresensiToExcel({
-            students: monthlyStudentList,
-            kelas: exportKelas,
-            bulan: exportBulan,
-            tahun: exportTahunNum,
-            waliKelas: exportWaliKelas,
-            tahunAjaran: exportTahun,
-          })
-        } else {
-          exportMonthlyPresensiToPDF({
-            students: monthlyStudentList,
-            kelas: exportKelas,
-            bulan: exportBulan,
-            tahun: exportTahunNum,
-            waliKelas: exportWaliKelas,
-            tahunAjaran: exportTahun,
-          })
-        }
       } else {
-        // Daily Single Day Export
-        if (exportFormat === "excel") {
-          await exportToExcel({
-            students,
-            kelas: exportKelas,
-            tahun: exportTahun,
-            waliKelas: exportWaliKelas,
-            tanggal: exportTanggal,
-            tanggalExport: currentExportTime,
-          })
-        } else {
-          exportToPDF({
-            students,
-            kelas: exportKelas,
-            tahun: exportTahun,
-            waliKelas: exportWaliKelas,
-            tanggal: exportTanggal,
-            tanggalExport: currentExportTime,
-          })
-        }
+        exportToPDF({
+          students,
+          kelas: exportKelas,
+          tahun: exportTahun,
+          waliKelas: exportWaliKelas,
+          tanggal: exportTanggal,
+          tanggalExport: currentExportTime,
+        })
       }
     } catch (err) {
       console.error("Export error:", err)
@@ -586,9 +458,9 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   return (
     <div className="space-y-4">
       {/* Fitur Search & Export Data */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-4">
         {/* Kiri: Search Input */}
-        <div className="relative w-full sm:w-72 md:w-80">
+        <div className="relative w-72 sm:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             type="search"
@@ -598,19 +470,19 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               setSearchQuery(e.target.value)
               setCurrentPage(1)
             }}
-            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border w-full"
+            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border"
           />
         </div>
 
         {/* Kanan: Tombol Hapus Data & Export */}
-        <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end shrink-0">
+        <div className="flex items-center gap-2">
           {!isSelectionMode ? (
             <Button
               variant="outline"
               size="sm"
               className="h-9 px-3 text-xs sm:text-sm gap-1.5 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer font-medium"
               onClick={() => setIsSelectionMode(true)}
-              disabled={!isMounted || students.length === 0}
+              disabled={students.length === 0}
             >
               <Trash2 className="h-4 w-4" />
               <span>Hapus Data</span>
@@ -646,7 +518,6 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
             variant="outline"
             className="h-9 px-3 text-xs sm:text-sm gap-2 cursor-pointer border-border hover:bg-accent"
             onClick={() => setIsExportOpen(true)}
-            disabled={!isMounted || students.length === 0}
           >
             <Download className="h-4 w-4" />
             <span>Export</span>
@@ -672,7 +543,7 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               )}
               <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
               <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
-              <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
+              <Table.Column className="text-foreground font-semibold">Nama</Table.Column>
               <Table.Column className="text-foreground font-semibold">L/P</Table.Column>
               <Table.Column className="text-foreground font-semibold text-center">Status Presensi</Table.Column>
             </Table.Header>
@@ -827,60 +698,26 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
       {/* Dialog Export Data Siswa */}
       <Dialog open={isExportOpen} onOpenChange={setIsExportOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-md">
           <form onSubmit={handleExportSubmit} className="space-y-4">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base font-semibold">
                 <Download className="h-5 w-5 text-[#4274D9]" />
-                <span>Export Rekapitulasi Presensi</span>
+                <span>Export Data Siswa</span>
               </DialogTitle>
               <DialogDescription className="text-xs">
-                Pilih format dokumen rekapitulasi bulanan (Landscape A4) atau harian untuk kelas {kelasCode.toUpperCase()}.
+                Pilih format dokumen dan atur metadata sebelum mengunduh data siswa.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-1">
-              {/* Mode Export: Rekap Bulanan vs Harian */}
+              {/* Tahap 1: Opsi Format Export */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Jenis Laporan</Label>
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <button
-                    type="button"
-                    onClick={() => setExportType("monthly")}
-                    className={cn(
-                      "flex flex-col items-start p-2.5 rounded-lg border text-left cursor-pointer transition-all",
-                      exportType === "monthly"
-                        ? "border-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 text-foreground font-medium ring-1 ring-emerald-600"
-                        : "border-border hover:bg-accent/50 text-muted-foreground"
-                    )}
-                  >
-                    <span className="text-xs font-bold text-foreground">✨ Rekap Bulanan</span>
-                    <span className="text-[10px] text-muted-foreground">1 Bulan dalam 1 Lembar Landscape</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setExportType("daily")}
-                    className={cn(
-                      "flex flex-col items-start p-2.5 rounded-lg border text-left cursor-pointer transition-all",
-                      exportType === "daily"
-                        ? "border-[#4274D9] bg-[#4274D9]/10 text-foreground font-medium ring-1 ring-[#4274D9]"
-                        : "border-border hover:bg-accent/50 text-muted-foreground"
-                    )}
-                  >
-                    <span className="text-xs font-bold text-foreground">📄 Presensi Harian</span>
-                    <span className="text-[10px] text-muted-foreground">Satu Tanggal Spesifik</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Format Dokumen: PDF vs Excel */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Format File</Label>
+                <Label className="text-xs font-semibold">Format Dokumen</Label>
                 <RadioGroup value={exportFormat} onValueChange={(val) => setExportFormat(val as "pdf" | "excel")} className="grid grid-cols-2 gap-3 mt-1">
                   <div
                     className={cn(
-                      "flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all",
+                      "flex items-center gap-2.5 p-3 rounded-lg border cursor-pointer transition-all",
                       exportFormat === "pdf"
                         ? "border-[#4274D9] bg-[#4274D9]/10 text-foreground font-medium"
                         : "border-border hover:bg-accent/50 text-muted-foreground"
@@ -891,13 +728,13 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-red-500 shrink-0" />
                       <Label htmlFor="export-pdf-heroui" className="text-xs font-medium cursor-pointer">
-                        PDF Landscape (.pdf)
+                        PDF (.pdf)
                       </Label>
                     </div>
                   </div>
                   <div
                     className={cn(
-                      "flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all",
+                      "flex items-center gap-2.5 p-3 rounded-lg border cursor-pointer transition-all",
                       exportFormat === "excel"
                         ? "border-[#4274D9] bg-[#4274D9]/10 text-foreground font-medium"
                         : "border-border hover:bg-accent/50 text-muted-foreground"
@@ -915,82 +752,39 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                 </RadioGroup>
               </div>
 
-              {/* Pengaturan Metadata Dokumen */}
+              {/* Tahap 2: Pengaturan Metadata Dokumen */}
               <FieldGroup className="space-y-3">
-                {exportType === "monthly" ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field>
-                      <Label className="text-xs font-semibold">Pilih Bulan</Label>
-                      <Select
-                        value={String(exportBulan)}
-                        onValueChange={(val) => val && setExportBulan(parseInt(val, 10))}
-                      >
-                        <SelectTrigger className="w-full h-9 text-xs">
-                          <SelectValue placeholder="Pilih Bulan" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[
-                            "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-                            "Juli", "Agustus", "September", "Oktober", "November", "Desember"
-                          ].map((bName, idx) => (
-                            <SelectItem key={idx + 1} value={String(idx + 1)}>
-                              {bName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field>
+                    <Label htmlFor="export-heroui-tanggal" className="text-xs font-semibold">Tanggal Presensi</Label>
+                    <Input
+                      id="export-heroui-tanggal"
+                      name="tanggal"
+                      value={exportTanggal}
+                      onChange={(e) => setExportTanggal(e.target.value)}
+                      placeholder="13 Agustus 2026"
+                      className="h-9 text-xs"
+                      required
+                    />
+                  </Field>
 
-                    <Field>
-                      <Label className="text-xs font-semibold">Tahun</Label>
-                      <Select
-                        value={String(exportTahunNum)}
-                        onValueChange={(val) => val && setExportTahunNum(parseInt(val, 10))}
-                      >
-                        <SelectTrigger className="w-full h-9 text-xs">
-                          <SelectValue placeholder="Pilih Tahun" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="2025">2025</SelectItem>
-                          <SelectItem value="2026">2026</SelectItem>
-                          <SelectItem value="2027">2027</SelectItem>
-                          <SelectItem value="2028">2028</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field>
-                      <Label htmlFor="export-heroui-tanggal" className="text-xs font-semibold">Tanggal Presensi</Label>
-                      <Input
-                        id="export-heroui-tanggal"
-                        name="tanggal"
-                        value={exportTanggal}
-                        onChange={(e) => setExportTanggal(e.target.value)}
-                        placeholder="18 Agustus 2026"
-                        className="h-9 text-xs"
-                        required
-                      />
-                    </Field>
-                    <Field>
-                      <Label htmlFor="export-heroui-wali-kelas" className="text-xs font-semibold">Wali Kelas</Label>
-                      <Input
-                        id="export-heroui-wali-kelas"
-                        name="waliKelas"
-                        value={exportWaliKelas}
-                        onChange={(e) => setExportWaliKelas(e.target.value)}
-                        placeholder="Devy, S.Pd."
-                        className="h-9 text-xs"
-                        required
-                      />
-                    </Field>
-                  </div>
-                )}
+                  <Field>
+                    <Label htmlFor="export-heroui-wali-kelas" className="text-xs font-semibold">Wali Kelas</Label>
+                    <Input
+                      id="export-heroui-wali-kelas"
+                      name="waliKelas"
+                      value={exportWaliKelas}
+                      onChange={(e) => setExportWaliKelas(e.target.value)}
+                      placeholder="Devy, S.Pd."
+                      className="h-9 text-xs"
+                      required
+                    />
+                  </Field>
+                </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <Field>
-                    <Label className="text-xs font-semibold">Kelas</Label>
+                    <Label className="text-xs font-semibold">Kelas Binaan</Label>
                     <Select value={exportKelas} onValueChange={(val) => val && setExportKelas(val)}>
                       <SelectTrigger className="w-full h-9 text-xs">
                         <SelectValue placeholder="Pilih Kelas" />
@@ -998,86 +792,107 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                       <SelectContent>
                         <SelectItem value="Kelas 9A">Kelas 9A</SelectItem>
                         <SelectItem value="Kelas 9B">Kelas 9B</SelectItem>
-                        <SelectItem value="Kelas 8H">Kelas 8H</SelectItem>
-                        <SelectItem value="Kelas 8I">Kelas 8I</SelectItem>
+                        <SelectItem value="Kelas 9C">Kelas 9C</SelectItem>
+                        <SelectItem value="Kelas 9D">Kelas 9D</SelectItem>
                       </SelectContent>
                     </Select>
                   </Field>
 
                   <Field>
-                    <Label className="text-xs font-semibold">Tahun Pelajaran</Label>
+                    <Label className="text-xs font-semibold">Tahun Ajaran</Label>
                     <Select value={exportTahun} onValueChange={(val) => val && setExportTahun(val)}>
                       <SelectTrigger className="w-full h-9 text-xs">
                         <SelectValue placeholder="Pilih Tahun" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="2025/2026">2025/2026</SelectItem>
                         <SelectItem value="2026/2027">2026/2027</SelectItem>
                         <SelectItem value="2027/2028">2027/2028</SelectItem>
                         <SelectItem value="2028/2029">2028/2029</SelectItem>
+                        <SelectItem value="2029/2030">2029/2030</SelectItem>
+                        <SelectItem value="2030/2031">2030/2031</SelectItem>
+                        <SelectItem value="2031/2032">2031/2032</SelectItem>
                       </SelectContent>
                     </Select>
                   </Field>
                 </div>
               </FieldGroup>
 
-              {/* Area Preview Ringkas */}
-              <div className="rounded-lg border border-border/80 bg-muted/60 p-3 text-xs space-y-2">
+              {/* Tahap 3: Area Preview Ringkas (Format Presensi Sesuai Layout Template) */}
+              <div className="rounded-lg border border-border/80 bg-muted/60 p-3.5 text-xs space-y-2">
                 <div className="flex items-center justify-between border-b border-border/50 pb-2">
-                  <span className="font-semibold text-foreground">
-                    {exportType === "monthly" ? "Preview Format Rekap Bulanan" : "Draft Dokumen Presensi Harian"}
-                  </span>
+                  <span className="font-semibold text-foreground">Draft Dokumen Presensi</span>
                   <span className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary font-mono font-bold uppercase">
-                    {exportType === "monthly" ? "A4 Landscape (1 Lembar)" : exportFormat === "pdf" ? "PDF Document" : "Excel (.xlsx)"}
+                    {exportFormat === "pdf" ? "PDF Document" : "Excel (.xlsx)"}
                   </span>
                 </div>
 
-                {exportType === "monthly" ? (
-                  <div className="bg-background/90 rounded border border-border/60 p-2.5 font-sans text-[11px] space-y-2 shadow-2xs">
-                    <div className="text-center font-bold text-foreground">
-                      REKAPITULASI PRESENSI BULANAN SISWA
-                    </div>
-                    <div className="text-center text-[10px] text-muted-foreground">
-                      BULAN: {[
-                        "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI",
-                        "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"
-                      ][exportBulan - 1]} {exportTahunNum} | {exportKelas} | TP {exportTahun}
-                    </div>
-
-                    <div className="p-2 rounded bg-muted/50 border border-border/40 text-[10px] space-y-1 text-muted-foreground">
-                      <div className="flex justify-between items-center text-foreground font-semibold">
-                        <span>✓ Format Standar Buku Absensi Guru</span>
-                        <span className="text-emerald-600 dark:text-emerald-400">Tercetak Pas 1 Lembar Melebar</span>
-                      </div>
-                      <div>• Matriks Tanggal 1 s/d {new Date(exportTahunNum, exportBulan, 0).getDate()} otomatis terisi kode presensi (H, S, I, A, D)</div>
-                      <div>• Hari Minggu & Tanggal Merah diarsir otomatis (-)</div>
-                      <div>• Kolom Rekapitulasi Akhir: Total H, S, I, A, D, & % Kehadiran per siswa</div>
-                    </div>
+                <div className="bg-background/90 rounded border border-border/60 p-3 font-mono text-[11px] space-y-1.5 shadow-2xs">
+                  <div className="text-center font-bold text-foreground tracking-wide">
+                    DAFTAR PRESENSI SISWA
                   </div>
-                ) : (
-                  <div className="bg-background/90 rounded border border-border/60 p-2.5 font-mono text-[11px] space-y-1.5 shadow-2xs">
-                    <div className="text-center font-bold text-foreground tracking-wide">
-                      DAFTAR PRESENSI SISWA
-                    </div>
-                    <div className="flex justify-between items-end pt-1 text-[10px] text-muted-foreground border-t border-border/40 font-sans">
+                  <div className="text-center font-bold text-foreground">
+                    TAHUN PELAJARAN {exportTahun}
+                  </div>
+                  <div className="flex justify-between items-end pt-2 text-[10px] text-muted-foreground border-t border-border/40 font-sans">
+                    <div>
                       <div>TANGGAL: {exportTanggal}</div>
-                      <div>{exportKelas}</div>
+                      <div className="italic">MATA PELAJARAN: Presensi Harian</div>
+                    </div>
+                    <div className="text-right font-medium text-foreground leading-tight">
+                      <div>KELAS : {exportKelas}</div>
+                      <div>Wali Kelas : {exportWaliKelas || "-"}</div>
                     </div>
                   </div>
-                )}
 
-                <div className="flex justify-between items-center text-[10px] text-muted-foreground pt-1">
-                  <span>Jumlah Siswa Terdaftar: <strong className="text-foreground font-semibold">{students.length} Siswa</strong></span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">✓ Siap Unduh</span>
+                  <div className="pt-2 font-sans">
+                    <div className="grid grid-cols-12 gap-1 bg-muted p-1 text-[9px] font-bold border text-center text-foreground">
+                      <div className="col-span-1">NO</div>
+                      <div className="col-span-2">NISN</div>
+                      <div className="col-span-4 text-left pl-1">NAMA</div>
+                      <div className="col-span-1">L/P</div>
+                      <div className="col-span-2">STATUS</div>
+                      <div className="col-span-2 text-left pl-1">KET</div>
+                    </div>
+                    <div className="divide-y border-x border-b text-[9px]">
+                      {students.slice(0, 3).map((s) => (
+                        <div key={s.nisn} className="grid grid-cols-12 gap-1 p-1 text-center items-center">
+                          <div className="col-span-1 font-mono">{s.noAbs}</div>
+                          <div className="col-span-2 font-mono text-muted-foreground truncate">{s.nisn}</div>
+                          <div className="col-span-4 text-left truncate pl-1 font-medium">{s.nama.toUpperCase()}</div>
+                          <div className="col-span-1">{s.gender === "Laki-laki" ? "L" : "P"}</div>
+                          <div className="col-span-2 font-bold">{s.status || "HADIR"}</div>
+                          <div className="col-span-2 text-left truncate pl-1 text-[8px] text-muted-foreground">
+                            {s.status === "DISPEN" ? (s.alasanDispen || "Dispen") : "-"}
+                          </div>
+                        </div>
+                      ))}
+                      {students.length > 3 && (
+                        <div className="p-1 text-center text-muted-foreground italic text-[9px]">
+                          ... dan {students.length - 3} siswa lainnya ...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-muted-foreground space-y-1 pt-1 border-t border-border/40 font-sans">
+                  <div className="flex justify-between items-center">
+                    <span>Rekap Presensi: <strong className="text-foreground">H: {students.filter((s) => (s.status || "HADIR") === "HADIR").length}</strong> | <strong className="text-amber-600">D: {students.filter((s) => s.status === "DISPEN").length}</strong> | <strong className="text-rose-600">S: {students.filter((s) => s.status === "SAKIT").length}</strong> | <strong className="text-sky-600">A: {students.filter((s) => s.status === "ALPHA").length}</strong></span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">✓ Format Presensi</span>
+                  </div>
+                  <div className="flex justify-between items-center text-[10px]">
+                    <span>Gender: L ({students.filter((s) => s.gender === "Laki-laki" || s.gender === "L").length}) | P ({students.filter((s) => s.gender === "Perempuan" || s.gender === "P").length})</span>
+                    <span>Total: <strong className="text-foreground font-semibold">{students.length} Siswa</strong></span>
+                  </div>
                 </div>
               </div>
             </div>
 
             <DialogFooter className="mt-2">
               <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs px-3">Batal</Button>} />
-              <Button type="submit" size="sm" className="h-8 text-xs px-3 gap-1.5 bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer font-medium">
+              <Button type="submit" size="sm" className="h-8 text-xs px-3 gap-1.5 bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer">
                 <Download className="h-3.5 w-3.5" />
-                <span>Unduh {exportType === "monthly" ? "Rekap Bulanan" : "Presensi"}</span>
+                <span>Unduh Dokumen</span>
               </Button>
             </DialogFooter>
           </form>
@@ -1252,7 +1067,7 @@ export default function HeroUITableAnatomy() {
           <Table.Header>
             <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
             <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
-            <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
+            <Table.Column className="text-foreground font-semibold">Nama</Table.Column>
             <Table.Column className="text-foreground font-semibold">L/P</Table.Column>
             <Table.Column className="text-foreground font-semibold text-center">Aksi</Table.Column>
           </Table.Header>

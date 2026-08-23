@@ -6,8 +6,6 @@ import { Card, CardContent } from "@/components/ui/card"
 import GlareHover from "@/components/glare-hover"
 import { JADWAL_BU_DEVY, getEffectiveScheduleDay } from "@/lib/data-jadwal"
 
-import { supabase } from "@/lib/supabase"
-
 const StatisticsCard = () => {
   const [totalSiswa, setTotalSiswa] = useState(0)
   const [totalHadir, setTotalHadir] = useState(0)
@@ -23,8 +21,6 @@ const StatisticsCard = () => {
   })
 
   useEffect(() => {
-    let isMounted = true
-
     const updateStats = () => {
       try {
         const stored = localStorage.getItem("saguru_migrated_students")
@@ -46,28 +42,13 @@ const StatisticsCard = () => {
               }).length
             }
           })
-          if (isMounted) {
-            setTotalSiswa(count)
-            setTotalHadir(hadir)
-          }
+          setTotalSiswa(count)
+          setTotalHadir(hadir)
+          return
         }
       } catch (err) {}
-    }
-
-    // Sync stats live from Supabase
-    async function syncFromSupabase() {
-      try {
-        const { data: studentData, error: sErr } = await supabase.from("students").select("nisn, kelas_code")
-        if (!sErr && Array.isArray(studentData) && isMounted) {
-          setTotalSiswa(studentData.length)
-          setTotalHadir(studentData.length)
-        }
-
-        const { data: taskData, error: tErr } = await supabase.from("tasks").select("id")
-        if (!tErr && Array.isArray(taskData) && isMounted) {
-          setTotalTugas(taskData.length)
-        }
-      } catch (err) {}
+      setTotalSiswa(0)
+      setTotalHadir(0)
     }
 
     const updateTaskCount = () => {
@@ -101,13 +82,11 @@ const StatisticsCard = () => {
     updateStats()
     updateTaskCount()
     updateJadwalInfo()
-    syncFromSupabase()
 
-    window.addEventListener("saguru-data-updated", () => { updateStats(); syncFromSupabase(); })
-    window.addEventListener("saguru-tasks-updated", () => { updateTaskCount(); syncFromSupabase(); })
+    window.addEventListener("saguru-data-updated", updateStats)
+    window.addEventListener("saguru-tasks-updated", updateTaskCount)
 
     return () => {
-      isMounted = false
       window.removeEventListener("saguru-data-updated", updateStats)
       window.removeEventListener("saguru-tasks-updated", updateTaskCount)
     }

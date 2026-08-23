@@ -43,7 +43,6 @@ import {
   EyeOff,
   Info,
 } from "lucide-react"
-import { studentService } from "@/lib/services/studentService"
 
 interface ParsedRow {
   noAbs: number
@@ -400,14 +399,6 @@ export function MigrasiDataForm() {
       const existingMap = existing ? JSON.parse(existing) : {}
       existingMap[classCode] = parsedData
       localStorage.setItem("saguru_migrated_students", JSON.stringify(existingMap))
-
-      // Save to Supabase
-      studentService.saveMigratedStudents(
-        parsedData.map((s) => ({ ...s, kelas_code: classCode })),
-        classCode,
-        waliKelas
-      )
-
       window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err) {
       console.error("Gagal menyimpan data migrasi:", err)
@@ -633,7 +624,7 @@ export function MigrasiDataForm() {
                         <Table.Header>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">No</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">NISN</Table.Column>
-                          <Table.Column isRowHeader className="text-foreground font-bold text-xs p-2.5">Nama Lengkap Siswa</Table.Column>
+                          <Table.Column className="text-foreground font-bold text-xs p-2.5">Nama Lengkap Siswa</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">L/P</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">Status</Table.Column>
                         </Table.Header>
@@ -758,16 +749,15 @@ export function MigrasiDataForm() {
                 </Button>
               }
             />
-            <Link href={submittedInfo?.kelas.toLowerCase() === "9a" ? "/siswa/9a" : "/siswa/binaan"} className="w-full sm:w-auto">
-              <Button
-                variant="outline"
-                onClick={() => setIsSuccessModalOpen(false)}
-                className="w-full sm:w-auto h-8 text-xs cursor-pointer gap-1.5 font-medium"
-              >
-                <span>{submittedInfo?.kelas.toLowerCase() === "9a" ? "Lihat Data Siswa 9A" : "Lihat Data Siswa Binaan"}</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
+            <Button
+              variant="outline"
+              onClick={() => setIsSuccessModalOpen(false)}
+              render={<Link href={submittedInfo?.kelas.toLowerCase() === "9a" ? "/siswa/9a" : "/siswa/binaan"} />}
+              className="w-full sm:w-auto h-8 text-xs cursor-pointer gap-1.5 font-medium"
+            >
+              <span>{submittedInfo?.kelas.toLowerCase() === "9a" ? "Lihat Data Siswa 9A" : "Lihat Data Siswa Binaan"}</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

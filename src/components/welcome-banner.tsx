@@ -16,7 +16,7 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card"
 
-import { getTodayScheduleSummary, getFullDateDetails } from "@/lib/data-jadwal"
+import { getTodayScheduleSummary } from "@/lib/data-jadwal"
 
 const defaultStudentData: any[] = []
 
@@ -116,12 +116,11 @@ export function WelcomeBanner() {
   const [isMinimized, setIsMinimized] = useState(false)
   const [timeStr, setTimeStr] = useState("")
 
-  const [isMounted, setIsMounted] = useState(false)
-  const [stats, setStats] = useState({
-    presensi: { total: 0, hadir: 0, percentage: 100 },
-    pendingTasks: { totalTasks: 0, pendingCount: 0 },
+  const [stats, setStats] = useState(() => ({
+    presensi: getPresensiStats(),
+    pendingTasks: getPendingTasksCount(),
     schedule: getTodayScheduleSummary(),
-  })
+  }))
 
   const refreshStats = () => {
     setStats({
@@ -132,7 +131,6 @@ export function WelcomeBanner() {
   }
 
   useEffect(() => {
-    setIsMounted(true)
     refreshStats()
     window.addEventListener("saguru-data-updated", refreshStats)
     window.addEventListener("saguru-tasks-updated", refreshStats)
@@ -236,31 +234,19 @@ export function WelcomeBanner() {
               <CarouselContent>
                 {/* Slide 1: Informasi Periode Akademik & Tanggal Realtime */}
                 <CarouselItem>
-                  {(() => {
-                    const d = getFullDateDetails()
-                    return (
-                      <div className="flex flex-col items-center justify-center text-center space-y-2 py-2 text-xs sm:text-sm font-medium">
-                        <div className="text-foreground/90">
-                          Saat ini Periode Semester{" "}
-                          <strong className="font-bold text-foreground">{d.academicSemester}</strong>{" "}
-                          Tahun Akademik{" "}
-                          <strong className="font-bold text-foreground">{d.academicYearShort}</strong> 😊
-                        </div>
-                        <div className="text-foreground/80 flex flex-wrap items-center justify-center gap-1.5">
-                          <span>
-                            <strong className="text-foreground">{d.dayName}</strong>{" "}
-                            <span className="text-blue-600 dark:text-blue-400 font-bold">{d.pasaran}</span>,
-                          </span>
-                          <span className="text-amber-600 dark:text-amber-400 font-bold">{d.masehiStr}</span>,
-                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">{d.hijriahStr}</span>
-                          {d.holidayName && (
-                            <span className="text-rose-600 dark:text-rose-400 font-bold">({d.holidayName})</span>
-                          )}
-                          {timeStr && <span className="text-foreground/90 font-mono ml-1">Pukul: {timeStr} WIB</span>}
-                        </div>
-                      </div>
-                    )
-                  })()}
+                  <div className="flex flex-col items-center justify-center text-center space-y-2 py-2 text-xs sm:text-sm font-medium">
+                    <div className="text-foreground/90">
+                      Saat ini Periode Semester <strong className="font-bold text-foreground">Genap</strong> Tahun Akademik <strong className="font-bold text-foreground">25/26</strong> 😊
+                    </div>
+                    <div className="text-foreground/80 flex flex-wrap items-center justify-center gap-1">
+                      <span>
+                        <strong className="text-foreground">Selasa</strong> <span className="text-blue-600 dark:text-blue-400 font-bold">Kliwon</span>,
+                      </span>
+                      <span className="text-amber-600 dark:text-amber-400 font-bold">11 Agustus 2026 Masehi</span>,
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">28 Safar 1448 Hijriah</span>
+                      {timeStr && <span className="text-foreground/90 font-mono">Pukul: {timeStr} WIB</span>}
+                    </div>
+                  </div>
                 </CarouselItem>
 
                 {/* Slide 3: Ringkasan Presensi & Tugas */}

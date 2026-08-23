@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import {
   GraduationCap,
   Users,
@@ -9,12 +10,14 @@ import {
   FileText,
   Calendar,
   Database,
+  ChevronDown,
+  ChevronRight,
+  X,
 } from "lucide-react"
 
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -22,150 +25,257 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar"
+import { Button } from "@/components/ui/button"
+
+interface SubMenuItem {
+  title: string
+  href: string
+}
+
+interface NavGroupItem {
+  title: string
+  icon: React.ElementType
+  defaultOpen?: boolean
+  items: SubMenuItem[]
+}
+
+const navGroups: NavGroupItem[] = [
+  {
+    title: "Data Siswa",
+    icon: Users,
+    defaultOpen: true,
+    items: [
+      {
+        title: "Kelas 9A",
+        href: "/siswa/9a",
+      },
+      {
+        title: "Kelas Binaan",
+        href: "/siswa/binaan",
+      },
+    ],
+  },
+  {
+    title: "Presensi",
+    icon: ClipboardCheck,
+    defaultOpen: true,
+    items: [
+      {
+        title: "Presensi 9A",
+        href: "/presensi/9a",
+      },
+      {
+        title: "Presensi 9B",
+        href: "/presensi/9b",
+      },
+      {
+        title: "Presensi 8H",
+        href: "/presensi/8h",
+      },
+      {
+        title: "Presensi 8I",
+        href: "/presensi/8i",
+      },
+    ],
+  },
+  {
+    title: "Tagihan Tugas",
+    icon: FileText,
+    defaultOpen: true,
+    items: [
+      {
+        title: "Tagihan Tugas 9A",
+        href: "/tugas/9a",
+      },
+      {
+        title: "Kelas Binaan",
+        href: "/tugas/binaan",
+      },
+      {
+        title: "Rekap Nilai",
+        href: "/tugas/rekap",
+      },
+    ],
+  },
+  {
+    title: "Jadwal & Modul",
+    icon: Calendar,
+    defaultOpen: true,
+    items: [
+      {
+        title: "Jadwal Mengajar",
+        href: "/jadwal",
+      },
+      {
+        title: "Perpustakaan Digital",
+        href: "/perpustakaan",
+      },
+    ],
+  },
+]
 
 export function AppSidebar() {
+  const pathname = usePathname()
+  const { isMobile, setOpenMobile } = useSidebar()
+
+  // Track open/collapsed state for each group
+  const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>({
+    "Data Siswa": true,
+    Presensi: true,
+    "Tagihan Tugas": true,
+    "Jadwal & Modul": true,
+  })
+
+  const toggleGroup = (groupTitle: string) => {
+    setOpenGroups((prev) => ({
+      ...prev,
+      [groupTitle]: !prev[groupTitle],
+    }))
+  }
+
+  const handleNavClick = () => {
+    if (isMobile) {
+      setOpenMobile(false)
+    }
+  }
+
   return (
-    <Sidebar collapsible="icon">
-      {/* Header Sidebar */}
-      <SidebarHeader className="border-b border-sidebar-border p-4">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#4274D9] text-white shrink-0 shadow-sm">
-            <GraduationCap className="h-5 w-5" />
-          </div>
-          <div className="flex flex-col truncate group-data-[collapsible=icon]:hidden">
-            <span className="font-extrabold text-base tracking-tight text-sidebar-foreground">BBB</span>
-            <span className="text-xs text-muted-foreground truncate">Sistem Administrasi Guru</span>
-          </div>
-        </Link>
+    <Sidebar side="left" variant="sidebar" collapsible="offcanvas" className="border-r border-sidebar-border bg-sidebar font-sans">
+      {/* 1. Header Sidebar */}
+      <SidebarHeader className="border-b border-sidebar-border p-4 bg-sidebar">
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            href="/"
+            onClick={handleNavClick}
+            className="flex items-center gap-3 group focus-visible:outline-hidden"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-[#3561BD] to-[#4274D9] text-white shadow-sm ring-1 ring-white/20 transition-transform group-hover:scale-105">
+              <GraduationCap className="h-5 w-5 stroke-[2.2]" />
+            </div>
+            <div className="flex flex-col">
+              <span className="font-extrabold text-base tracking-tight text-sidebar-foreground">
+                SAGURU
+              </span>
+              <span className="text-[11px] text-muted-foreground font-medium">
+                Sistem Administrasi Guru
+              </span>
+            </div>
+          </Link>
+
+          {/* Close button specifically for mobile */}
+          {isMobile && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setOpenMobile(false)}
+              className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-sidebar-accent cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+              <span className="sr-only">Tutup Menu</span>
+            </Button>
+          )}
+        </div>
       </SidebarHeader>
 
-      {/* Content Sidebar */}
-      <SidebarContent>
-        {/* Grup 1: Data Siswa */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Data Siswa</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/siswa/9a" />} tooltip="Kelas 9A (Wali Kelas)">
-                  <Users />
-                  <span>Kelas 9A (Wali Kelas)</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/siswa/binaan" />} tooltip="Kelas Binaan">
-                  <Users />
-                  <span>Kelas Binaan</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+      {/* 2. Content Sidebar */}
+      <SidebarContent className="px-2 py-3 space-y-4 overflow-y-auto">
+        {navGroups.map((group) => {
+          const GroupIcon = group.icon
+          const isOpen = openGroups[group.title] ?? true
 
-        {/* Grup 2: Presensi */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Presensi</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/presensi/9a" />} tooltip="Presensi 9A">
-                  <ClipboardCheck />
-                  <span>Presensi 9A</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/presensi/9b" />} tooltip="Presensi 9B">
-                  <ClipboardCheck />
-                  <span>Presensi 9B</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/presensi/8h" />} tooltip="Presensi 8H">
-                  <ClipboardCheck />
-                  <span>Presensi 8H</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/presensi/8i" />} tooltip="Presensi 8I">
-                  <ClipboardCheck />
-                  <span>Presensi 8I</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+          return (
+            <SidebarGroup key={group.title} className="p-0">
+              <SidebarGroupLabel
+                onClick={() => toggleGroup(group.title)}
+                className="flex items-center justify-between px-2.5 py-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground/90 hover:text-sidebar-foreground cursor-pointer rounded-lg hover:bg-sidebar-accent/50 transition-colors select-none group/label"
+              >
+                <div className="flex items-center gap-2">
+                  <GroupIcon className="h-3.5 w-3.5 text-muted-foreground group-hover/label:text-sidebar-foreground transition-colors" />
+                  <span>{group.title}</span>
+                </div>
+                <div className="flex items-center text-muted-foreground/60 group-hover/label:text-muted-foreground">
+                  {isOpen ? (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  )}
+                </div>
+              </SidebarGroupLabel>
 
-        {/* Grup 3: Tagihan Tugas */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Tagihan Tugas</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/tugas/9a" />} tooltip="Tugas Kelas 9A">
-                  <FileText />
-                  <span>Tugas Kelas 9A</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/tugas/binaan" />} tooltip="Tugas Kelas Binaan">
-                  <FileText />
-                  <span>Tugas Kelas Binaan</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/tugas/rekap" />} tooltip="Rekap Nilai">
-                  <FileText />
-                  <span>Rekap Nilai</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+              {isOpen && (
+                <SidebarGroupContent className="pt-1">
+                  <SidebarMenu className="gap-1">
+                    <SidebarMenuSub className="mx-2.5 my-0.5 border-l-2 border-sidebar-border/80 pl-2 space-y-1">
+                      {group.items.map((item) => {
+                        const isActive = pathname === item.href
 
-        {/* Grup 4: Jadwal & Modul */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Jadwal & Modul</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/jadwal" />} tooltip="Jadwal Pelajaran">
-                  <Calendar />
-                  <span>Jadwal Pelajaran</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/modul" />} tooltip="Modul & Bahan Ajar">
-                  <FileText />
-                  <span>Modul & Bahan Ajar</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+                        return (
+                          <SidebarMenuSubItem key={item.href}>
+                            <SidebarMenuSubButton
+                              isActive={isActive}
+                              render={
+                                <Link
+                                  href={item.href}
+                                  onClick={handleNavClick}
+                                  className={`flex items-center justify-between w-full px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
+                                    isActive
+                                      ? "bg-[#4274D9] text-white font-semibold shadow-xs hover:bg-[#3561bd]"
+                                      : "text-sidebar-foreground/85 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                  }`}
+                                >
+                                  <span className="truncate">{item.title}</span>
+                                </Link>
+                              }
+                            />
+                          </SidebarMenuSubItem>
+                        )
+                      })}
+                    </SidebarMenuSub>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              )}
+            </SidebarGroup>
+          )
+        })}
 
-        {/* Grup 5: Migrasi Data */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Lainnya</SidebarGroupLabel>
+        {/* 3. Group Khusus: Migrasi Data */}
+        <SidebarGroup className="p-0 pt-2 border-t border-sidebar-border/60">
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton render={<Link href="/migrasi-data" />} tooltip="Migrasi Data">
-                  <Database />
-                  <span>Migrasi Data</span>
-                </SidebarMenuButton>
+                <SidebarMenuButton
+                  isActive={pathname === "/migrasi-data"}
+                  render={
+                    <Link
+                      href="/migrasi-data"
+                      onClick={handleNavClick}
+                      className={`flex items-center w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                        pathname === "/migrasi-data"
+                          ? "bg-[#4274D9] text-white shadow-xs"
+                          : "text-primary hover:bg-primary/10"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Database className="h-4 w-4" />
+                        <span>Migrasi Data Siswa</span>
+                      </div>
+                    </Link>
+                  }
+                  tooltip="Migrasi Data Siswa"
+                />
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
 
-      {/* Footer Sidebar */}
-      <SidebarFooter className="border-t border-sidebar-border p-3">
-        <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-          <span>BBB &copy; 2026 Admin Guru</span>
-        </div>
-      </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   )
 }

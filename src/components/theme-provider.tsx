@@ -1,74 +1,27 @@
-"use client"
+"use client";
 
-import * as React from "react"
-
-type Theme = "dark" | "light" | "system"
-
-interface ThemeProviderContextType {
-  theme: Theme
-  setTheme: (theme: Theme) => void
-}
-
-const ThemeProviderContext = React.createContext<ThemeProviderContextType>({
-  theme: "system",
-  setTheme: () => null,
-})
+import * as React from "react";
+import { ThemeProvider as NextThemesProvider } from "next-themes";
 
 export function ThemeProvider({
   children,
-  defaultTheme = "system",
-  storageKey = "theme",
-}: {
-  children: React.ReactNode
-  defaultTheme?: Theme
-  storageKey?: string
-  attribute?: string
-  enableSystem?: boolean
-  disableTransitionOnChange?: boolean
-}) {
-  const [theme, setThemeState] = React.useState<Theme>(defaultTheme)
+  ...props
+}: React.ComponentProps<typeof NextThemesProvider>) {
+  const [mounted, setMounted] = React.useState(false);
 
   React.useEffect(() => {
-    try {
-      const saved = localStorage.getItem(storageKey)
-      if (saved === "light" || saved === "dark" || saved === "system") {
-        setThemeState(saved)
-      }
-    } catch (e) {}
-  }, [storageKey])
-
-  React.useEffect(() => {
-    const root = window.document.documentElement
-    root.classList.remove("light", "dark")
-
-    if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light"
-      root.classList.add(systemTheme)
-      return
-    }
-
-    root.classList.add(theme)
-  }, [theme])
-
-  const setTheme = React.useCallback(
-    (newTheme: Theme) => {
-      try {
-        localStorage.setItem(storageKey, newTheme)
-      } catch (e) {}
-      setThemeState(newTheme)
-    },
-    [storageKey]
-  )
+    setMounted(true);
+  }, []);
 
   return (
-    <ThemeProviderContext.Provider value={{ theme, setTheme }}>
-      {children}
-    </ThemeProviderContext.Provider>
-  )
-}
-
-export const useTheme = () => {
-  return React.useContext(ThemeProviderContext)
+    <NextThemesProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      disableTransitionOnChange
+      {...props}
+    >
+      {mounted ? children : <div style={{ visibility: "hidden" }}>{children}</div>}
+    </NextThemesProvider>
+  );
 }

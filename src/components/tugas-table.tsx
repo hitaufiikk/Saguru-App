@@ -21,7 +21,6 @@ import {
   Sparkles,
   Trash2,
   UserPlus,
-  Loader2,
 } from "lucide-react"
 
 import { Table } from "@heroui/react"
@@ -61,8 +60,6 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { studentService } from "@/lib/services/studentService"
-import { tugasService } from "@/lib/services/tugasService"
 import { cn } from "@/lib/utils"
 import { exportTugasToExcel, exportTugasToPDF } from "@/lib/export-utils"
 
@@ -111,94 +108,30 @@ const defaultStudents: StudentBase[] = [
 
 export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const router = useRouter()
-  const [students, setStudents] = useState<StudentBase[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-
-  // Listen for data updates & fetch from Supabase
-  useEffect(() => {
-    let isMounted = true
-    async function loadFromSupabase() {
+  const [students, setStudents] = useState<StudentBase[]>(() => {
+    if (typeof window !== "undefined") {
       try {
-        const [supStudents, supExclusions, supTasks, supGrades] = await Promise.all([
-          studentService.getStudentsByClass(kelasCode),
-          tugasService.getTugasExclusions(kelasCode),
-          tugasService.getTasksByClass(kelasCode),
-          tugasService.getGradesByClass(kelasCode),
-        ])
+        const stored = localStorage.getItem("saguru_migrated_students")
+        const deletedTugas = localStorage.getItem("saguru_tugas_deleted_nisns")
+        const deletedMap = deletedTugas ? JSON.parse(deletedTugas) : {}
+        const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
 
-        if (isMounted) {
-          if (supStudents.length > 0) {
-            setStudents(
-              supStudents
-                .filter((s) => !supExclusions.includes(s.nisn))
-                .map((s, idx) => ({
-                  noAbs: s.noAbs || (idx + 1),
-                  nisn: s.nisn,
-                  nama: s.nama,
-                  gender: s.gender,
-                }))
-            )
-          } else {
-            setStudents(defaultStudents)
-          }
-
-          // 2. Load and merge tasks from LocalStorage & Supabase
-          let localTasks: TaskDefinition[] = []
-          try {
-            const storedTasks = localStorage.getItem("saguru_tasks_list")
-            if (storedTasks) {
-              localTasks = JSON.parse(storedTasks)
-            }
-          } catch (err) {}
-
-          const supTasksMapped: TaskDefinition[] = (supTasks || []).map((t) => ({
-            id: t.id,
-            title: t.title,
-            mapel: t.mapel,
-            kelasCode: t.kelas_code,
-            deadline: "23:59 WIB",
-            maxScore: 100,
-          }))
-
-          const taskMap = new Map<string, TaskDefinition>()
-          localTasks.forEach((t) => {
-            const key = `${t.id}_${t.mapel}_${(t.kelasCode || kelasCode).toLowerCase()}`
-            taskMap.set(key, t)
-          })
-          supTasksMapped.forEach((t) => {
-            const key = `${t.id}_${t.mapel}_${(t.kelasCode || kelasCode).toLowerCase()}`
-            taskMap.set(key, t)
-          })
-
-          const mergedTasks = Array.from(taskMap.values())
-          if (mergedTasks.length > 0) {
-            setTasks(mergedTasks)
-          }
-
-          if (Object.keys(supGrades).length > 0) {
-            setGrades((prev) => {
-              const updated = { ...prev }
-              Object.keys(supGrades).forEach((k) => {
-                updated[k] = {
-                  score: supGrades[k].score,
-                  status: (supGrades[k].status || "BELUM") as TaskStatusType,
-                }
-              })
-              try {
-                localStorage.setItem("saguru_grades_matrix", JSON.stringify(updated))
-              } catch (err) {}
-              return updated
-            })
+        if (stored) {
+          const map = JSON.parse(stored)
+          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
+            const classStudents: StudentBase[] = map[kelasCode?.toLowerCase()]
+            return classStudents.filter((s) => !hiddenNisns.includes(s.nisn))
           }
         }
       } catch (err) {
-      } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
+        console.error("Error reading localStorage:", err)
       }
     }
+    return []
+  })
 
+  // Listen for student data updates & tasks updates
+  useEffect(() => {
     const handleUpdate = () => {
       try {
         const stored = localStorage.getItem("saguru_migrated_students")
@@ -208,24 +141,18 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
         if (stored) {
           const map = JSON.parse(stored)
-          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()]) && map[kelasCode?.toLowerCase()].length > 0) {
+          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
             const classStudents: StudentBase[] = map[kelasCode?.toLowerCase()]
             setStudents(classStudents.filter((s) => !hiddenNisns.includes(s.nisn)))
-          } else {
-            setStudents(defaultStudents)
+            return
           }
-        } else {
-          setStudents(defaultStudents)
         }
+        setStudents([])
       } catch (err) {}
-      loadFromSupabase()
     }
-
-    handleUpdate()
     window.addEventListener("saguru-data-updated", handleUpdate)
     window.addEventListener("saguru-tasks-updated", handleUpdate)
     return () => {
-      isMounted = false
       window.removeEventListener("saguru-data-updated", handleUpdate)
       window.removeEventListener("saguru-tasks-updated", handleUpdate)
     }
@@ -236,26 +163,40 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
 
-  const [isMounted, setIsMounted] = useState(false)
-
   // Tasks definitions state
-  const [tasks, setTasks] = useState<TaskDefinition[]>([])
+  const [tasks, setTasks] = useState<TaskDefinition[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("saguru_tasks_list")
+        if (stored) {
+          return JSON.parse(stored)
+        }
+      } catch (err) {}
+    }
+    return []
+  })
 
   // Grade matrix state
-  const [grades, setGrades] = useState<Record<string, TaskGradeRecord>>({})
+  const [grades, setGrades] = useState<Record<string, TaskGradeRecord>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("saguru_grades_matrix")
+        if (stored) {
+          return JSON.parse(stored)
+        }
+      } catch (err) {}
+    }
+    return {}
+  })
 
   // Listen for tasks updates across app
   useEffect(() => {
-    setIsMounted(true)
     const handleTasksUpdate = () => {
       try {
-        const storedTasks = localStorage.getItem("saguru_tasks_list")
-        if (storedTasks) setTasks(JSON.parse(storedTasks))
+        const stored = localStorage.getItem("saguru_tasks_list")
+        if (stored) setTasks(JSON.parse(stored))
         const storedGrades = localStorage.getItem("saguru_grades_matrix")
-        if (storedGrades) {
-          const parsed = JSON.parse(storedGrades)
-          setGrades((prev) => ({ ...parsed, ...prev }))
-        }
+        if (storedGrades) setGrades(JSON.parse(storedGrades))
       } catch (err) {}
     }
     handleTasksUpdate()
@@ -267,7 +208,6 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false)
   const [newTitle, setNewTitle] = useState("")
   const [newDeadline, setNewDeadline] = useState("2026-08-28, 23:59 WIB")
-  const [isSubmittingTask, setIsSubmittingTask] = useState(false)
 
   // State Quick Grade Modal
   const [gradeModalTarget, setGradeModalTarget] = useState<{
@@ -289,29 +229,31 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   // Persistent Multi-select Key
   const storageKey = `saguru_selected_tugas_${kelasCode.toLowerCase()}_${selectedMapel}`
 
-  // State Dialog Hapus Tugas
-  const [isDeleteTaskOpen, setIsDeleteTaskOpen] = useState(false)
-
   // Multi-select & Bulk Delete State
   const [isSelectionMode, setIsSelectionMode] = useState(false)
-  const [selectedNisns, setSelectedNisns] = useState<string[]>([])
+  const [selectedNisns, setSelectedNisns] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(storageKey)
+        if (stored) return JSON.parse(stored)
+      } catch (err) {}
+    }
+    return []
+  })
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
 
   // Load selection when kelasCode or selectedMapel changes
   useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        const stored = localStorage.getItem(storageKey)
-        if (stored) {
-          setSelectedNisns(JSON.parse(stored))
-        } else {
-          setSelectedNisns([])
-        }
-      } catch (err) {
+    try {
+      const stored = localStorage.getItem(storageKey)
+      if (stored) {
+        setSelectedNisns(JSON.parse(stored))
+      } else {
         setSelectedNisns([])
       }
-    }, 0)
-    return () => clearTimeout(timer)
+    } catch (err) {
+      setSelectedNisns([])
+    }
   }, [kelasCode, selectedMapel, storageKey])
 
   const saveSelectedNisns = (newSelected: string[]) => {
@@ -328,19 +270,14 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
       .sort((a, b) => a.id - b.id)
   }, [tasks, selectedMapel, kelasCode])
 
-  // Effective Students with defaultStudents fallback
-  const effectiveStudents = useMemo(() => {
-    return students.length > 0 ? students : defaultStudents
-  }, [students])
-
   // Filtered Students
   const filteredStudents = useMemo(() => {
-    return effectiveStudents.filter(
+    return students.filter(
       (s) =>
         s.nama.toLowerCase().includes(searchQuery.toLowerCase()) ||
         s.nisn.includes(searchQuery)
     )
-  }, [effectiveStudents, searchQuery])
+  }, [students, searchQuery])
 
   const isAllSelected = filteredStudents.length > 0 && filteredStudents.every((s) => selectedNisns.includes(s.nisn))
 
@@ -374,9 +311,6 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
       window.dispatchEvent(new Event("saguru-tasks-updated"))
     } catch (err) {}
 
-    // Sync exclusions to Supabase
-    selectedNisns.forEach((id) => tugasService.addTugasExclusion(id, kelasCode))
-
     saveSelectedNisns([])
     setIsBulkDeleteOpen(false)
     setIsSelectionMode(false)
@@ -396,7 +330,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
   // Helper: Calculate Student Stats for selected mapel
   const calculateStudentStats = (nisn: string) => {
-    if (mapelTasks.length === 0) return { totalGraded: 0, avg: 0, isPassed: false }
+    if (mapelTasks.length === 0) return { totalGraded: 0, avg: 0, isPassed: true }
 
     let totalScore = 0
     let gradedCount = 0
@@ -413,82 +347,37 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     return {
       totalGraded: gradedCount,
       avg,
-      isPassed: gradedCount > 0 ? avg >= 75 : false,
+      isPassed: avg >= 75,
     }
   }
 
   // Submit Buat Tugas Baru
-  const handleCreateTask = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleCreateTask = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (mapelTasks.length >= 30) {
       alert("Batas maksimal 30 tugas per mata pelajaran telah tercapai.")
       return
     }
 
-    setIsSubmittingTask(true)
-    const taskTitle = newTitle.trim() || `Tugas ${mapelTasks.length + 1}`
-
-    try {
-      // 1. Sync to Supabase first
-      const createdTask = await tugasService.addTask(taskTitle, selectedMapel, kelasCode)
-
-      const nextId = createdTask?.id || (mapelTasks.length > 0 ? Math.max(...mapelTasks.map((t) => t.id)) + 1 : 1)
-      const newTaskObj: TaskDefinition = {
-        id: nextId,
-        mapel: selectedMapel,
-        kelasCode: kelasCode.toLowerCase(),
-        title: taskTitle,
-        deadline: newDeadline.trim() || "2026-08-30, 23:59 WIB",
-        maxScore: 100,
-      }
-
-      const updated = [...tasks, newTaskObj]
-      setTasks(updated)
-      try {
-        localStorage.setItem("saguru_tasks_list", JSON.stringify(updated))
-      } catch (err) {}
-    } catch (err) {
-      console.error("Error creating task:", err)
-    } finally {
-      setIsSubmittingTask(false)
-      setNewTitle("")
-      setIsAddTaskOpen(false)
+    const nextId = mapelTasks.length > 0 ? Math.max(...mapelTasks.map((t) => t.id)) + 1 : 1
+    const newTaskObj: TaskDefinition = {
+      id: nextId,
+      mapel: selectedMapel,
+      kelasCode: kelasCode.toLowerCase(),
+      title: newTitle.trim() || `Tugas ${nextId}`,
+      deadline: newDeadline.trim() || "2026-08-30, 23:59 WIB",
+      maxScore: 100,
     }
-  }
 
-  // Delete Task Handler (Opsi B)
-  const handleDeleteTask = async (taskId: number) => {
-    // 1. Delete from Supabase first to prevent race condition
-    await tugasService.deleteTask(taskId, kelasCode)
-
-    // 2. Remove task from local tasks state
-    const updatedTasks = tasks.filter(
-      (t) => !(t.id === taskId && t.mapel === selectedMapel && (!t.kelasCode || t.kelasCode === kelasCode.toLowerCase()))
-    )
-    setTasks(updatedTasks)
+    const updated = [...tasks, newTaskObj]
+    setTasks(updated)
     try {
-      localStorage.setItem("saguru_tasks_list", JSON.stringify(updatedTasks))
+      localStorage.setItem("saguru_tasks_list", JSON.stringify(updated))
+      window.dispatchEvent(new Event("saguru-tasks-updated"))
     } catch (err) {}
 
-    // 3. Clean up associated grades from grades state
-    const updatedGrades = { ...grades }
-    Object.keys(updatedGrades).forEach((key) => {
-      if (key.endsWith(`_${kelasCode.toLowerCase()}_${selectedMapel}_${taskId}`)) {
-        delete updatedGrades[key]
-      }
-    })
-    setGrades(updatedGrades)
-    try {
-      localStorage.setItem("saguru_grades_matrix", JSON.stringify(updatedGrades))
-    } catch (err) {}
-
-    // 4. Auto-close modal if no tasks remain for this mapel
-    const remainingMapelTasks = updatedTasks.filter(
-      (t) => t.mapel === selectedMapel && (!t.kelasCode || t.kelasCode === kelasCode.toLowerCase())
-    )
-    if (remainingMapelTasks.length === 0) {
-      setIsDeleteTaskOpen(false)
-    }
+    setNewTitle("")
+    setIsAddTaskOpen(false)
   }
 
   // Open Quick Grade Modal
@@ -501,7 +390,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   }
 
   // Save Quick Grade
-  const handleSaveGrade = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSaveGrade = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!gradeModalTarget) return
 
@@ -520,10 +409,8 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     setGrades(updatedGrades)
     try {
       localStorage.setItem("saguru_grades_matrix", JSON.stringify(updatedGrades))
+      window.dispatchEvent(new Event("saguru-tasks-updated"))
     } catch (err) {}
-
-    // Sync to Supabase asynchronously
-    await tugasService.saveGrade(task.id, student.nisn, kelasCode, parsedScore, inputStatus, selectedMapel)
 
     setGradeModalTarget(null)
   }
@@ -617,7 +504,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         </div>
 
         {/* Right: Tambah Tugas & Export Buttons */}
-        <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end shrink-0">
+        <div className="flex items-center gap-2 justify-end shrink-0">
           {/* Popover Tambah Tugas Baru */}
           <Popover open={isAddTaskOpen} onOpenChange={setIsAddTaskOpen}>
             <PopoverTrigger render={
@@ -674,20 +561,8 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/60">
                   <PopoverClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs px-3">Batal</Button>} />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={isSubmittingTask}
-                    className="h-8 text-xs px-3 bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer font-medium"
-                  >
-                    {isSubmittingTask ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                        <span>Menyimpan...</span>
-                      </>
-                    ) : (
-                      <span>Simpan</span>
-                    )}
+                  <Button type="submit" size="sm" className="h-8 text-xs px-3 bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer">
+                    Simpan
                   </Button>
                 </div>
               </form>
@@ -702,24 +577,51 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
             />
           )}
 
-          {/* Tombol Hapus Tugas */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 px-3 text-xs sm:text-sm gap-1.5 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer font-medium"
-            onClick={() => setIsDeleteTaskOpen(true)}
-            disabled={isMounted ? mapelTasks.length === 0 : true}
-          >
-            <Trash2 className="h-4 w-4" />
-            <span>Hapus Tugas</span>
-          </Button>
+          {/* Tombol Hapus Data & Mode Seleksi */}
+          {!isSelectionMode ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 px-3 text-xs sm:text-sm gap-1.5 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer font-medium"
+              onClick={() => setIsSelectionMode(true)}
+              disabled={students.length === 0}
+            >
+              <Trash2 className="h-4 w-4" />
+              <span>Hapus Data</span>
+            </Button>
+          ) : (
+            <div className="flex items-center gap-1.5 animate-in fade-in">
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={selectedNisns.length === 0}
+                className="h-9 px-3 text-xs sm:text-sm gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer font-medium"
+                onClick={() => setIsBulkDeleteOpen(true)}
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>Hapus ({selectedNisns.length})</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 px-3 text-xs sm:text-sm cursor-pointer border-border hover:bg-accent text-muted-foreground"
+                onClick={() => {
+                  setIsSelectionMode(false)
+                  saveSelectedNisns([])
+                }}
+              >
+                Batal
+              </Button>
+            </div>
+          )}
 
           {/* Tombol Export */}
           <Button
             variant="outline"
             className="h-9 px-3 text-xs sm:text-sm gap-2 cursor-pointer border-border hover:bg-accent"
             onClick={() => setIsExportOpen(true)}
-            disabled={!isMounted || mapelTasks.length === 0 || students.length === 0}
+            disabled={mapelTasks.length === 0 || students.length === 0}
           >
             <Download className="h-4 w-4" />
             <span>Export</span>
@@ -746,7 +648,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               )}
               <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
               <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
-              <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
+              <Table.Column className="text-foreground font-semibold">Nama</Table.Column>
               <Table.Column className="text-foreground font-semibold">L/P</Table.Column>
 
               {/* Dynamic Task Header Columns */}
@@ -762,20 +664,10 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
             </Table.Header>
 
             <Table.Body>
-              {isLoading ? (
-                /* LOADING SKELETON STATE (Eliminates Initial Flash) */
+              {mapelTasks.length === 0 ? (
+                /* EMPTY STATE (0 Data Kalo Belum Ada Tugas - Tidak Tampilkan Baris Siswa) */
                 <Table.Row>
-                  <Table.Cell colSpan={(isSelectionMode ? 7 : 6) + mapelTasks.length} className="h-64 text-center py-10">
-                    <div className="flex flex-col items-center justify-center space-y-3 max-w-sm mx-auto">
-                      <Loader2 className="h-7 w-7 text-primary animate-spin" />
-                      <p className="text-xs text-muted-foreground font-medium">Memuat data tugas & siswa...</p>
-                    </div>
-                  </Table.Cell>
-                </Table.Row>
-              ) : mapelTasks.length === 0 ? (
-                /* EMPTY STATE (0 Task Exists for Selected Mapel) */
-                <Table.Row>
-                  <Table.Cell colSpan={6} className="h-64 text-center py-10">
+                  <Table.Cell colSpan={isSelectionMode ? 7 : 6} className="h-64 text-center py-10">
                     <div className="flex flex-col items-center justify-center space-y-3 max-w-sm mx-auto">
                       <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
                         <FileSpreadsheet className="h-6 w-6" />
@@ -783,7 +675,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                       <div className="space-y-1">
                         <p className="text-sm font-bold text-foreground">Belum Ada Tagihan Tugas</p>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          Belum ada daftar tugas untuk mata pelajaran <strong className="text-foreground">{selectedMapel}</strong> di Kelas {kelasCode.toUpperCase()}. Silakan buat tugas baru.
+                          Belum ada daftar tugas untuk mata pelajaran <strong className="text-foreground">{selectedMapel}</strong> di Kelas {kelasCode.toUpperCase()}. Silakan tambah tugas baru.
                         </p>
                       </div>
                       <Button
@@ -797,8 +689,8 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                     </div>
                   </Table.Cell>
                 </Table.Row>
-              ) : effectiveStudents.length === 0 ? (
-                /* NO STUDENTS REGISTERED YET */
+              ) : students.length === 0 ? (
+                /* TASK EXISTS BUT NO STUDENTS REGISTERED YET */
                 <Table.Row>
                   <Table.Cell colSpan={(isSelectionMode ? 7 : 6) + mapelTasks.length} className="h-64 text-center py-10">
                     <div className="flex flex-col items-center justify-center space-y-3 max-w-md mx-auto">
@@ -807,13 +699,13 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                       </div>
                       <div className="space-y-1">
                         <p className="text-sm font-bold text-foreground">
-                          Belum Ada Data Siswa Terdaftar
+                          {mapelTasks.length} Tugas {selectedMapel} Terdaftar
                         </p>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          Belum ada data siswa terdaftar di Kelas <strong className="text-foreground">{kelasCode.toUpperCase()}</strong>. Silakan migrasi data siswa terlebih dahulu.
+                          Tugas telah ditambahkan, tetapi belum ada data siswa terdaftar di Kelas <strong className="text-foreground">{kelasCode.toUpperCase()}</strong>. Silakan migrasi data siswa untuk mulai menginput nilai.
                         </p>
                       </div>
-                      <Link href="/migrasi-data">
+                      <Link href="/migrasi">
                         <Button
                           size="sm"
                           className="h-8 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white gap-1.5 font-medium mt-1 cursor-pointer"
@@ -1132,50 +1024,28 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog Hapus Tugas (Opsi B) */}
-      <Dialog open={isDeleteTaskOpen} onOpenChange={setIsDeleteTaskOpen}>
-        <DialogContent className="sm:max-w-md bg-card border-border shadow-xl">
+      {/* Dialog Konfirmasi Hapus Beberapa / Semua Data Tagihan Tugas */}
+      <Dialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>
+        <DialogContent className="sm:max-w-md bg-card border-border">
           <DialogHeader>
             <DialogTitle className="text-red-600 dark:text-red-400 flex items-center gap-2">
               <Trash2 className="h-5 w-5" />
-              <span>Hapus Tugas ({selectedMapel})</span>
+              <span>Konfirmasi Hapus Data Tagihan Tugas</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
-              Pilih tugas yang ingin dihapus dari katalog <strong className="text-foreground">{selectedMapel}</strong> (Kelas {kelasCode.toUpperCase()}). Menghapus tugas akan menghapus kolom tugas dan nilainya, <strong>tanpa menghapus data siswa</strong>.
+              Apakah Anda yakin ingin menghapus <strong className="text-foreground font-semibold">{selectedNisns.length} data siswa</strong> dari matriks tagihan tugas {selectedMapel} Kelas {kelasCode.toUpperCase()}? Data yang telah dihapus tidak dapat dikembalikan.
             </DialogDescription>
           </DialogHeader>
-
-          <div className="space-y-2 py-2 max-h-[260px] overflow-y-auto">
-            {mapelTasks.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-4">Tidak ada tugas terdaftar untuk mata pelajaran ini.</p>
-            ) : (
-              mapelTasks.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors"
-                >
-                  <div className="space-y-0.5">
-                    <p className="text-xs font-semibold text-foreground">
-                      Tugas {t.id} - {t.title}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">Deadline: {t.deadline}</p>
-                  </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="h-8 text-xs px-3 bg-red-600 hover:bg-red-700 text-white cursor-pointer font-medium"
-                    onClick={() => handleDeleteTask(t.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    Hapus
-                  </Button>
-                </div>
-              ))
-            )}
-          </div>
-
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs">Tutup</Button>} />
+          <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs">Batal</Button>} />
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white font-medium cursor-pointer"
+              onClick={handleExecuteBulkDelete}
+            >
+              Ya, Hapus {selectedNisns.length} Data
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

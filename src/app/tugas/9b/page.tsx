@@ -1,6 +1,6 @@
 "use client"
 
-import { TugasFreeformTable } from "@/components/tugas-freeform-table"
+import { TugasTable } from "@/components/tugas-table"
 import Link from "next/link"
 
 export default function Tugas9BPage() {
@@ -16,7 +16,7 @@ export default function Tugas9BPage() {
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
-          <TugasFreeformTable kelasCode="9b" />
+          <TugasTable kelasCode="9b" />
         </div>
       </div>
     </main>
