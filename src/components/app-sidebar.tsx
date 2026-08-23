@@ -13,14 +13,11 @@ import {
   ChevronDown,
   ChevronRight,
   X,
-  Sparkles,
-  ShieldCheck,
 } from "lucide-react"
 
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -39,8 +36,6 @@ import { Button } from "@/components/ui/button"
 interface SubMenuItem {
   title: string
   href: string
-  badge?: string
-  badgeVariant?: "default" | "secondary" | "outline"
 }
 
 interface NavGroupItem {
@@ -59,7 +54,6 @@ const navGroups: NavGroupItem[] = [
       {
         title: "Kelas 9A",
         href: "/siswa/9a",
-        badge: "Wali Kelas",
       },
       {
         title: "Kelas Binaan",
@@ -75,22 +69,18 @@ const navGroups: NavGroupItem[] = [
       {
         title: "Presensi 9A",
         href: "/presensi/9a",
-        badge: "9A",
       },
       {
         title: "Presensi 9B",
         href: "/presensi/9b",
-        badge: "9B",
       },
       {
         title: "Presensi 8H",
         href: "/presensi/8h",
-        badge: "8H",
       },
       {
         title: "Presensi 8I",
         href: "/presensi/8i",
-        badge: "8I",
       },
     ],
   },
@@ -102,7 +92,6 @@ const navGroups: NavGroupItem[] = [
       {
         title: "Tagihan Tugas 9A",
         href: "/tugas/9a",
-        badge: "Wali Kelas",
       },
       {
         title: "Kelas Binaan",
@@ -126,7 +115,6 @@ const navGroups: NavGroupItem[] = [
       {
         title: "Perpustakaan Digital",
         href: "/perpustakaan",
-        badge: "PDF",
       },
     ],
   },
@@ -242,17 +230,6 @@ export function AppSidebar() {
                                   }`}
                                 >
                                   <span className="truncate">{item.title}</span>
-                                  {item.badge && (
-                                    <span
-                                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
-                                        isActive
-                                          ? "bg-white/20 text-white"
-                                          : "bg-muted text-muted-foreground border border-border/60"
-                                      }`}
-                                    >
-                                      {item.badge}
-                                    </span>
-                                  )}
                                 </Link>
                               }
                             />
@@ -278,7 +255,7 @@ export function AppSidebar() {
                     <Link
                       href="/migrasi-data"
                       onClick={handleNavClick}
-                      className={`flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      className={`flex items-center w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                         pathname === "/migrasi-data"
                           ? "bg-[#4274D9] text-white shadow-xs"
                           : "text-primary hover:bg-primary/10"
@@ -288,7 +265,6 @@ export function AppSidebar() {
                         <Database className="h-4 w-4" />
                         <span>Migrasi Data Siswa</span>
                       </div>
-                      <Sparkles className="h-3.5 w-3.5 opacity-80" />
                     </Link>
                   }
                   tooltip="Migrasi Data Siswa"
@@ -298,23 +274,6 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-
-      {/* 4. Footer Sidebar */}
-      <SidebarFooter className="border-t border-sidebar-border p-3.5 bg-sidebar/50">
-        <div className="flex items-center gap-3 p-2 rounded-xl bg-sidebar-accent/40 border border-sidebar-border/50">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0 font-bold text-xs">
-            <ShieldCheck className="h-4 w-4" />
-          </div>
-          <div className="flex flex-col overflow-hidden">
-            <span className="text-xs font-bold text-sidebar-foreground truncate">
-              Bu Devy, S.Pd.
-            </span>
-            <span className="text-[10px] text-muted-foreground truncate">
-              Guru Matematika &amp; Wali 9A
-            </span>
-          </div>
-        </div>
-      </SidebarFooter>
 
       <SidebarRail />
     </Sidebar>
