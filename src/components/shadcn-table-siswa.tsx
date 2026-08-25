@@ -41,6 +41,7 @@ import {
   getFormattedCurrentDate,
   getFormattedCurrentDateTime,
 } from "@/lib/export-utils"
+import { studentService } from "@/lib/services/studentService"
 
 export interface StudentItem {
   noAbs: number
@@ -124,8 +125,10 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
   })
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
 
-  // Load selection when kelasCode changes
+  // Load selection and fetch from Supabase + localStorage when kelasCode changes
   useEffect(() => {
+    let isMounted = true
+
     try {
       const stored = localStorage.getItem(storageKey)
       if (stored) {
@@ -135,6 +138,55 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       }
     } catch (err) {
       setSelectedNisns([])
+    }
+
+    const loadData = async () => {
+      try {
+        const dbData = await studentService.getStudentsByClass(kelasCode)
+        if (isMounted && dbData && dbData.length > 0) {
+          const formatted: StudentItem[] = dbData.map((s, index) => ({
+            noAbs: s.noAbs || index + 1,
+            nisn: s.nisn,
+            nama: s.nama,
+            gender: s.gender || "Laki-laki",
+            kontakOrtu: s.kontak_ortu || "-",
+          }))
+          setStudents(formatted)
+
+          try {
+            const stored = localStorage.getItem("saguru_migrated_students")
+            const map = stored ? JSON.parse(stored) : {}
+            map[kelasCode.toLowerCase()] = formatted
+            localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
+          } catch (e) {}
+          return
+        }
+      } catch (err) {
+        console.warn("Supabase fetch student fallback:", err)
+      }
+
+      // Fallback to local storage
+      try {
+        const stored = localStorage.getItem("saguru_migrated_students")
+        if (stored) {
+          const map = JSON.parse(stored)
+          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
+            if (isMounted) setStudents(map[kelasCode?.toLowerCase()])
+          }
+        }
+      } catch (e) {}
+    }
+
+    loadData()
+
+    const handleDataUpdated = () => {
+      loadData()
+    }
+    window.addEventListener("saguru-data-updated", handleDataUpdated)
+
+    return () => {
+      isMounted = false
+      window.removeEventListener("saguru-data-updated", handleDataUpdated)
     }
   }, [kelasCode, storageKey])
 
@@ -206,7 +258,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
   const startIndex = (safeCurrentPage - 1) * itemsPerPage
   const paginatedStudents = filteredStudents.slice(startIndex, startIndex + itemsPerPage)
 
-  const handleAddSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!addNama.trim() || !addNisn.trim()) return
 
@@ -230,6 +282,16 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err) {}
 
+    // Async sync to Supabase
+    studentService.addStudent({
+      nisn: newStudent.nisn,
+      nama: newStudent.nama,
+      gender: newStudent.gender,
+      kelas_code: kelasCode.toLowerCase(),
+      wali_kelas: kelasCode.toLowerCase() === "9a" ? "Devy, S.Pd." : "-",
+      kontak_ortu: newStudent.kontakOrtu,
+    }).catch((err) => console.warn("Supabase addStudent sync error:", err))
+
     setAddNama("")
     setAddNisn("")
     setAddGender("cowok")
@@ -245,7 +307,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
     setEditKontak(student.kontakOrtu || "-")
   }
 
-  const handleSaveEdit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSaveEdit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!editingStudent || !editNama.trim() || !editNisn.trim()) return
 
@@ -270,14 +332,22 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err) {}
 
+    // Async sync to Supabase
+    studentService.updateStudent(editingStudent.nisn, {
+      nama: editNama.trim(),
+      nisn: editNisn.trim(),
+      gender: editGender === "cowok" ? "Laki-laki" : "Perempuan",
+    }).catch((err) => console.warn("Supabase updateStudent sync error:", err))
+
     setEditingStudent(null)
   }
 
-  const handleConfirmDelete = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleConfirmDelete = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!deletingStudent) return
 
-    const updated = students.filter((s) => s.nisn !== deletingStudent.nisn)
+    const targetNisn = deletingStudent.nisn
+    const updated = students.filter((s) => s.nisn !== targetNisn)
     setStudents(updated)
 
     try {
@@ -287,6 +357,9 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
       window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err) {}
+
+    // Async sync to Supabase
+    studentService.deleteStudent(targetNisn).catch((err) => console.warn("Supabase deleteStudent sync error:", err))
 
     setDeletingStudent(null)
   }

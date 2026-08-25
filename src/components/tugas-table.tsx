@@ -62,6 +62,8 @@ import {
 } from "@/components/ui/pagination"
 import { cn } from "@/lib/utils"
 import { exportTugasToExcel, exportTugasToPDF } from "@/lib/export-utils"
+import { studentService } from "@/lib/services/studentService"
+import { tugasService } from "@/lib/services/tugasService"
 
 // Types
 export interface StudentBase {
@@ -129,35 +131,6 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     }
     return []
   })
-
-  // Listen for student data updates & tasks updates
-  useEffect(() => {
-    const handleUpdate = () => {
-      try {
-        const stored = localStorage.getItem("saguru_migrated_students")
-        const deletedTugas = localStorage.getItem("saguru_tugas_deleted_nisns")
-        const deletedMap = deletedTugas ? JSON.parse(deletedTugas) : {}
-        const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
-
-        if (stored) {
-          const map = JSON.parse(stored)
-          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
-            const classStudents: StudentBase[] = map[kelasCode?.toLowerCase()]
-            setStudents(classStudents.filter((s) => !hiddenNisns.includes(s.nisn)))
-            return
-          }
-        }
-        setStudents([])
-      } catch (err) {}
-    }
-    window.addEventListener("saguru-data-updated", handleUpdate)
-    window.addEventListener("saguru-tasks-updated", handleUpdate)
-    return () => {
-      window.removeEventListener("saguru-data-updated", handleUpdate)
-      window.removeEventListener("saguru-tasks-updated", handleUpdate)
-    }
-  }, [kelasCode])
-
   const [selectedMapel, setSelectedMapel] = useState("Matematika")
   const [searchQuery, setSearchQuery] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
@@ -189,20 +162,102 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     return {}
   })
 
-  // Listen for tasks updates across app
+  // Fetch from Supabase + localStorage on mount and when kelasCode changes
   useEffect(() => {
-    const handleTasksUpdate = () => {
+    let isMounted = true
+
+    const loadData = async () => {
       try {
-        const stored = localStorage.getItem("saguru_tasks_list")
-        if (stored) setTasks(JSON.parse(stored))
-        const storedGrades = localStorage.getItem("saguru_grades_matrix")
-        if (storedGrades) setGrades(JSON.parse(storedGrades))
+        const [dbStudents, dbTasks, dbGrades] = await Promise.all([
+          studentService.getStudentsByClass(kelasCode),
+          tugasService.getTasksByClass(kelasCode),
+          tugasService.getGradesByClass(kelasCode),
+        ])
+
+        if (isMounted) {
+          if (dbStudents && dbStudents.length > 0) {
+            const deletedTugas = localStorage.getItem("saguru_tugas_deleted_nisns")
+            const deletedMap = deletedTugas ? JSON.parse(deletedTugas) : {}
+            const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
+
+            const formatted: StudentBase[] = dbStudents
+              .filter((s) => !hiddenNisns.includes(s.nisn))
+              .map((s, index) => ({
+                noAbs: s.noAbs || index + 1,
+                nisn: s.nisn,
+                nama: s.nama,
+                gender: s.gender || "Laki-laki",
+              }))
+            setStudents(formatted)
+          }
+
+          if (dbTasks && dbTasks.length > 0) {
+            const formattedTasks: TaskDefinition[] = dbTasks.map((t, idx) => ({
+              id: t.id,
+              mapel: t.mapel || "Matematika",
+              kelasCode: t.kelas_code,
+              title: t.title,
+              deadline: "2026-08-28, 23:59 WIB",
+              maxScore: 100,
+            }))
+            setTasks(formattedTasks)
+            try {
+              localStorage.setItem("saguru_tasks_list", JSON.stringify(formattedTasks))
+            } catch (e) {}
+          }
+
+          if (dbGrades && Object.keys(dbGrades).length > 0) {
+            const formattedGrades: Record<string, TaskGradeRecord> = {}
+            Object.keys(dbGrades).forEach((k) => {
+              const g = dbGrades[k]
+              formattedGrades[k] = {
+                score: g.score,
+                status: (g.status as TaskStatusType) || "BELUM",
+                catatan: "",
+              }
+            })
+            setGrades((prev) => ({ ...prev, ...formattedGrades }))
+            try {
+              const storedGrades = localStorage.getItem("saguru_grades_matrix")
+              const existing = storedGrades ? JSON.parse(storedGrades) : {}
+              localStorage.setItem("saguru_grades_matrix", JSON.stringify({ ...existing, ...formattedGrades }))
+            } catch (e) {}
+          }
+        }
+      } catch (err) {
+        console.warn("Supabase tugas load fallback:", err)
+      }
+
+      // Fallback
+      try {
+        const stored = localStorage.getItem("saguru_migrated_students")
+        const deletedTugas = localStorage.getItem("saguru_tugas_deleted_nisns")
+        const deletedMap = deletedTugas ? JSON.parse(deletedTugas) : {}
+        const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
+
+        if (stored) {
+          const map = JSON.parse(stored)
+          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
+            const classStudents: StudentBase[] = map[kelasCode?.toLowerCase()]
+            if (isMounted) setStudents(classStudents.filter((s) => !hiddenNisns.includes(s.nisn)))
+          }
+        }
       } catch (err) {}
     }
-    handleTasksUpdate()
-    window.addEventListener("saguru-tasks-updated", handleTasksUpdate)
-    return () => window.removeEventListener("saguru-tasks-updated", handleTasksUpdate)
-  }, [])
+
+    loadData()
+
+    const handleUpdate = () => {
+      loadData()
+    }
+    window.addEventListener("saguru-data-updated", handleUpdate)
+    window.addEventListener("saguru-tasks-updated", handleUpdate)
+    return () => {
+      isMounted = false
+      window.removeEventListener("saguru-data-updated", handleUpdate)
+      window.removeEventListener("saguru-tasks-updated", handleUpdate)
+    }
+  }, [kelasCode, selectedMapel])
 
   // State Dialog Buat Tugas Baru
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false)

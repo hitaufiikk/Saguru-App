@@ -47,6 +47,8 @@ import {
   getFormattedCurrentDate,
   getFormattedCurrentDateTime,
 } from "@/lib/export-utils"
+import { studentService } from "@/lib/services/studentService"
+import { presensiService } from "@/lib/services/presensiService"
 
 export interface StudentItem {
   noAbs: number
@@ -154,9 +156,51 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     return []
   })
 
-  // Listen for data updates
+  // Fetch from Supabase + localStorage on mount and when kelasCode changes
   useEffect(() => {
-    const handleUpdate = () => {
+    let isMounted = true
+
+    const loadData = async () => {
+      try {
+        const [dbStudents, dbPresensi] = await Promise.all([
+          studentService.getStudentsByClass(kelasCode),
+          presensiService.getPresensiByClass(kelasCode),
+        ])
+
+        if (isMounted && dbStudents && dbStudents.length > 0) {
+          const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
+          const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
+          const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
+
+          const formatted: StudentItem[] = dbStudents
+            .filter((s) => !hiddenNisns.includes(s.nisn))
+            .map((s, index) => {
+              const pInfo = dbPresensi[s.nisn]
+              return {
+                noAbs: s.noAbs || index + 1,
+                nisn: s.nisn,
+                nama: s.nama,
+                gender: s.gender || "Laki-laki",
+                status: getValidAttendanceStatus(pInfo?.status || s.status),
+                alasanDispen: pInfo?.alasanDispen || "",
+              }
+            })
+
+          setStudents(formatted)
+
+          try {
+            const stored = localStorage.getItem("saguru_migrated_students")
+            const map = stored ? JSON.parse(stored) : {}
+            map[kelasCode.toLowerCase()] = formatted
+            localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
+          } catch (e) {}
+          return
+        }
+      } catch (err) {
+        console.warn("Supabase presensi load fallback:", err)
+      }
+
+      // Fallback to local storage
       try {
         const stored = localStorage.getItem("saguru_migrated_students")
         const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
@@ -167,20 +211,28 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
           const map = JSON.parse(stored)
           if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
             const classStudents: StudentItem[] = map[kelasCode?.toLowerCase()]
-            setStudents(
-              classStudents
-                .filter((s) => !hiddenNisns.includes(s.nisn))
-                .map((s) => ({ ...s, status: getValidAttendanceStatus(s.status) }))
-            )
-            return
+            if (isMounted) {
+              setStudents(
+                classStudents
+                  .filter((s) => !hiddenNisns.includes(s.nisn))
+                  .map((s) => ({ ...s, status: getValidAttendanceStatus(s.status) }))
+              )
+            }
           }
         }
-        setStudents([])
       } catch (err) {}
     }
-    handleUpdate()
+
+    loadData()
+
+    const handleUpdate = () => {
+      loadData()
+    }
     window.addEventListener("saguru-data-updated", handleUpdate)
-    return () => window.removeEventListener("saguru-data-updated", handleUpdate)
+    return () => {
+      isMounted = false
+      window.removeEventListener("saguru-data-updated", handleUpdate)
+    }
   }, [kelasCode])
 
   const [searchQuery, setSearchQuery] = useState("")
@@ -310,22 +362,31 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     e.preventDefault()
     if (!dispenStudent) return
 
+    const reason = dispenAlasan.trim()
+    const targetStudent = dispenStudent
     const updated = students.map((s) =>
-      s.nisn === dispenStudent.nisn
+      s.nisn === targetStudent.nisn
         ? {
             ...s,
             status: "DISPEN",
-            alasanDispen: dispenAlasan.trim(),
+            alasanDispen: reason,
           }
         : s
     )
     setStudents(updated)
     syncToLocalStorage(updated)
+
+    // Async sync to Supabase
+    presensiService
+      .updateAttendance(targetStudent.nisn, kelasCode, "DISPEN", reason, undefined, targetStudent.nama)
+      .catch((err) => console.warn("Supabase updateAttendance error:", err))
+
     setDispenStudent(null)
     setDispenAlasan("")
   }
 
   const handleSetStatus = (nisn: string, newStatus: string) => {
+    const student = students.find((s) => s.nisn === nisn)
     const updated = students.map((s) =>
       s.nisn === nisn
         ? {
@@ -337,6 +398,11 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     )
     setStudents(updated)
     syncToLocalStorage(updated)
+
+    // Async sync to Supabase
+    presensiService
+      .updateAttendance(nisn, kelasCode, newStatus, "", undefined, student?.nama)
+      .catch((err) => console.warn("Supabase updateAttendance error:", err))
   }
 
   // State Dialog Export Data

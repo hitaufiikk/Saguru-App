@@ -32,6 +32,7 @@ import { Field, FieldGroup } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Camera, Image as ImageIcon, Upload, CheckCircle2, User, Settings, LogOut, Lock } from "lucide-react"
+import { profileService } from "@/lib/services/profileService"
 
 const DEFAULT_AVATAR = "https://avatars.githubusercontent.com/u/124599?v=4"
 const DEFAULT_WALLPAPER = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop"
@@ -52,20 +53,45 @@ export function AccountDropdown() {
   const wallpaperInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    try {
-      const savedAvatar = localStorage.getItem("saguru_avatar_photo")
-      if (savedAvatar) setAvatarUrl(savedAvatar)
+    let isMounted = true
+    const loadProfile = async () => {
+      try {
+        const p = await profileService.getProfile()
+        if (isMounted && p) {
+          if (p.name) setName(p.name)
+          if (p.roleTitle) setRoleTitle(p.roleTitle)
+          if (p.avatarUrl) setAvatarUrl(p.avatarUrl)
+          if (p.wallpaperUrl) setWallpaperUrl(p.wallpaperUrl)
 
-      const savedWallpaper = localStorage.getItem("saguru_wallpaper_photo")
-      if (savedWallpaper) setWallpaperUrl(savedWallpaper)
+          try {
+            if (p.name) localStorage.setItem("saguru_profile_name", p.name)
+            if (p.roleTitle) localStorage.setItem("saguru_profile_role", p.roleTitle)
+            if (p.avatarUrl) localStorage.setItem("saguru_avatar_photo", p.avatarUrl)
+            if (p.wallpaperUrl) localStorage.setItem("saguru_wallpaper_photo", p.wallpaperUrl)
+          } catch (e) {}
+          return
+        }
+      } catch (err) {}
 
-      const savedName = localStorage.getItem("saguru_profile_name")
-      if (savedName) setName(savedName)
+      // Fallback
+      try {
+        const savedAvatar = localStorage.getItem("saguru_avatar_photo")
+        if (savedAvatar && isMounted) setAvatarUrl(savedAvatar)
 
-      const savedRole = localStorage.getItem("saguru_profile_role")
-      if (savedRole) setRoleTitle(savedRole)
-    } catch (err) {
-      console.error("Gagal membaca profil dari localStorage:", err)
+        const savedWallpaper = localStorage.getItem("saguru_wallpaper_photo")
+        if (savedWallpaper && isMounted) setWallpaperUrl(savedWallpaper)
+
+        const savedName = localStorage.getItem("saguru_profile_name")
+        if (savedName && isMounted) setName(savedName)
+
+        const savedRole = localStorage.getItem("saguru_profile_role")
+        if (savedRole && isMounted) setRoleTitle(savedRole)
+      } catch (err) {}
+    }
+
+    loadProfile()
+    return () => {
+      isMounted = false
     }
   }, [])
 
@@ -91,9 +117,8 @@ export function AccountDropdown() {
           setAvatarUrl(b64)
           try {
             localStorage.setItem("saguru_avatar_photo", b64)
-          } catch (err) {
-            console.error("Gagal menyimpan foto avatar:", err)
-          }
+          } catch (err) {}
+          profileService.saveProfile({ avatarUrl: b64 }).catch((e) => console.warn(e))
         }
       }
       reader.readAsDataURL(file)
@@ -111,9 +136,8 @@ export function AccountDropdown() {
           setWallpaperUrl(b64)
           try {
             localStorage.setItem("saguru_wallpaper_photo", b64)
-          } catch (err) {
-            console.error("Gagal menyimpan wallpaper:", err)
-          }
+          } catch (err) {}
+          profileService.saveProfile({ wallpaperUrl: b64 }).catch((e) => console.warn(e))
         }
       }
       reader.readAsDataURL(file)
@@ -133,6 +157,13 @@ export function AccountDropdown() {
     } catch (err) {
       console.error("Gagal menyimpan profil:", err)
     }
+
+    profileService.saveProfile({
+      name,
+      roleTitle,
+      avatarUrl,
+      wallpaperUrl,
+    }).catch((err) => console.warn("Supabase saveProfile error:", err))
   }
 
   // Token settings state

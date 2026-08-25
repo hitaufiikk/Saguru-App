@@ -5,6 +5,8 @@ import { Icon } from "@iconify/react"
 import { Card, CardContent } from "@/components/ui/card"
 import GlareHover from "@/components/glare-hover"
 import { JADWAL_BU_DEVY, getEffectiveScheduleDay } from "@/lib/data-jadwal"
+import { studentService } from "@/lib/services/studentService"
+import { tugasService } from "@/lib/services/tugasService"
 
 const StatisticsCard = () => {
   const [totalSiswa, setTotalSiswa] = useState(0)
@@ -21,7 +23,53 @@ const StatisticsCard = () => {
   })
 
   useEffect(() => {
-    const updateStats = () => {
+    let isMounted = true
+
+    const updateStats = async () => {
+      // 1. Try Supabase first
+      try {
+        const allStudents = await studentService.getAllStudents()
+        if (isMounted && allStudents && allStudents.length > 0) {
+          const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
+          const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
+
+          // Map students by class to sync localStorage
+          const classMap: Record<string, any[]> = {}
+          allStudents.forEach((s) => {
+            const cCode = (s.kelas_code || "9a").toLowerCase()
+            if (!classMap[cCode]) classMap[cCode] = []
+            classMap[cCode].push({
+              noAbs: s.noAbs,
+              nisn: s.nisn,
+              nama: s.nama,
+              gender: s.gender,
+              status: s.status || "HADIR",
+              kontakOrtu: s.kontak_ortu || "-",
+            })
+          })
+
+          try {
+            localStorage.setItem("saguru_migrated_students", JSON.stringify(classMap))
+          } catch (e) {}
+
+          let count = 0
+          let hadir = 0
+          Object.keys(classMap).forEach((k) => {
+            const hiddenNisns: string[] = deletedMap[k] || []
+            const active = classMap[k].filter((s) => !hiddenNisns.includes(s.nisn))
+            count += active.length
+            hadir += active.filter((s) => !["DISPEN", "SAKIT", "ALPHA"].includes(s.status)).length
+          })
+
+          setTotalSiswa(count)
+          setTotalHadir(hadir)
+          return
+        }
+      } catch (err) {
+        console.warn("Supabase stats fetch fallback:", err)
+      }
+
+      // Fallback to local storage
       try {
         const stored = localStorage.getItem("saguru_migrated_students")
         const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
@@ -42,27 +90,40 @@ const StatisticsCard = () => {
               }).length
             }
           })
-          setTotalSiswa(count)
-          setTotalHadir(hadir)
+          if (isMounted) {
+            setTotalSiswa(count)
+            setTotalHadir(hadir)
+          }
           return
         }
       } catch (err) {}
-      setTotalSiswa(0)
-      setTotalHadir(0)
+
+      if (isMounted) {
+        setTotalSiswa(0)
+        setTotalHadir(0)
+      }
     }
 
-    const updateTaskCount = () => {
+    const updateTaskCount = async () => {
+      try {
+        const tasks = await tugasService.getTasksByClass("9a")
+        if (isMounted && tasks && tasks.length > 0) {
+          setTotalTugas(tasks.length)
+          return
+        }
+      } catch (err) {}
+
       try {
         const stored = localStorage.getItem("saguru_tasks_list")
         if (stored) {
           const list = JSON.parse(stored)
           if (Array.isArray(list)) {
-            setTotalTugas(list.length)
+            if (isMounted) setTotalTugas(list.length)
             return
           }
         }
       } catch (err) {}
-      setTotalTugas(0)
+      if (isMounted) setTotalTugas(0)
     }
 
     const updateJadwalInfo = () => {
