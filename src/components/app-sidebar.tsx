@@ -41,7 +41,6 @@ interface SubMenuItem {
 interface NavGroupItem {
   title: string
   icon: React.ElementType
-  defaultOpen?: boolean
   items: SubMenuItem[]
 }
 
@@ -49,7 +48,6 @@ const navGroups: NavGroupItem[] = [
   {
     title: "Data Siswa",
     icon: Users,
-    defaultOpen: true,
     items: [
       {
         title: "Kelas 9A",
@@ -64,7 +62,6 @@ const navGroups: NavGroupItem[] = [
   {
     title: "Presensi",
     icon: ClipboardCheck,
-    defaultOpen: true,
     items: [
       {
         title: "Presensi 9A",
@@ -87,7 +84,6 @@ const navGroups: NavGroupItem[] = [
   {
     title: "Tagihan Tugas",
     icon: FileText,
-    defaultOpen: true,
     items: [
       {
         title: "Tagihan Tugas 9A",
@@ -106,7 +102,6 @@ const navGroups: NavGroupItem[] = [
   {
     title: "Jadwal & Modul",
     icon: Calendar,
-    defaultOpen: true,
     items: [
       {
         title: "Jadwal Mengajar",
@@ -122,16 +117,29 @@ const navGroups: NavGroupItem[] = [
 
 export function AppSidebar() {
   const pathname = usePathname()
-  const { isMobile, setOpenMobile } = useSidebar()
+  const { isMobile, openMobile, setOpenMobile } = useSidebar()
 
-  // Track open/collapsed state for each group
+  // Initial state: SEMUA ACCORDION MENUTUP SECARA DEFAULT (Posisi Awal/Refresh Menutup)
   const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>({
-    "Data Siswa": true,
-    Presensi: true,
-    "Tagihan Tugas": true,
-    "Jadwal & Modul": true,
+    "Data Siswa": false,
+    Presensi: false,
+    "Tagihan Tugas": false,
+    "Jadwal & Modul": false,
   })
 
+  // Reset semua accordion menutup saat sidebar ditutup / dibuka ulang
+  React.useEffect(() => {
+    if (!openMobile) {
+      setOpenGroups({
+        "Data Siswa": false,
+        Presensi: false,
+        "Tagihan Tugas": false,
+        "Jadwal & Modul": false,
+      })
+    }
+  }, [openMobile])
+
+  // Toggle buka/tutup accordion saat diklik
   const toggleGroup = (groupTitle: string) => {
     setOpenGroups((prev) => ({
       ...prev,
@@ -139,7 +147,14 @@ export function AppSidebar() {
     }))
   }
 
+  // Saat salah satu item menu diklik: tutup accordion & tutup sidebar mobile
   const handleNavClick = () => {
+    setOpenGroups({
+      "Data Siswa": false,
+      Presensi: false,
+      "Tagihan Tugas": false,
+      "Jadwal & Modul": false,
+    })
     if (isMobile) {
       setOpenMobile(false)
     }
@@ -173,7 +188,15 @@ export function AppSidebar() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setOpenMobile(false)}
+              onClick={() => {
+                setOpenGroups({
+                  "Data Siswa": false,
+                  Presensi: false,
+                  "Tagihan Tugas": false,
+                  "Jadwal & Modul": false,
+                })
+                setOpenMobile(false)
+              }}
               className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-sidebar-accent cursor-pointer"
             >
               <X className="h-4 w-4" />
@@ -184,16 +207,16 @@ export function AppSidebar() {
       </SidebarHeader>
 
       {/* 2. Content Sidebar */}
-      <SidebarContent className="px-2 py-3 space-y-4 overflow-y-auto">
+      <SidebarContent className="px-2 py-3 space-y-3 overflow-y-auto">
         {navGroups.map((group) => {
           const GroupIcon = group.icon
-          const isOpen = openGroups[group.title] ?? true
+          const isOpen = openGroups[group.title] ?? false
 
           return (
             <SidebarGroup key={group.title} className="p-0">
               <SidebarGroupLabel
                 onClick={() => toggleGroup(group.title)}
-                className="flex items-center justify-between px-2.5 py-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground/90 hover:text-sidebar-foreground cursor-pointer rounded-lg hover:bg-sidebar-accent/50 transition-colors select-none group/label"
+                className="flex items-center justify-between px-2.5 py-2 text-xs font-bold uppercase tracking-wider text-muted-foreground/90 hover:text-sidebar-foreground cursor-pointer rounded-lg hover:bg-sidebar-accent/50 transition-colors select-none group/label"
               >
                 <div className="flex items-center gap-2">
                   <GroupIcon className="h-3.5 w-3.5 text-muted-foreground group-hover/label:text-sidebar-foreground transition-colors" />
