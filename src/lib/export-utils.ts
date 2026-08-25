@@ -743,3 +743,500 @@ export function exportJadwalToPDF(options: ExportJadwalOptions) {
     doc.save(filename)
   }
 }
+
+export interface StudentCatatanData {
+  noAbs: number
+  nisn: string
+  nama: string
+  gender: string
+  catatan: string
+}
+
+export interface ExportCatatanBinaanOptions {
+  students: StudentCatatanData[]
+  kelas: string
+  tahun?: string
+  waliKelas?: string
+}
+
+export async function generateCatatanBinaanExcelWorkbook(
+  options: ExportCatatanBinaanOptions
+): Promise<ExcelJS.Workbook> {
+  const { students, kelas, tahun = "2025/2026", waliKelas = "-" } = options
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet("Tagihan Catatan Siswa")
+
+  worksheet.columns = [
+    { key: "noAbs", width: 10 },
+    { key: "nisn", width: 18 },
+    { key: "nama", width: 35 },
+    { key: "gender", width: 8 },
+    { key: "catatan", width: 50 },
+  ]
+
+  // Row 1: Title
+  const r1 = worksheet.addRow(["DAFTAR TAGIHAN TUGAS & CATATAN SISWA"])
+  worksheet.mergeCells("A1:E1")
+  r1.font = { name: "Arial", size: 12, bold: true }
+  r1.alignment = { horizontal: "center", vertical: "middle" }
+
+  // Row 2: Subtitle
+  const r2 = worksheet.addRow([`TAHUN PELAJARAN ${tahun}`])
+  worksheet.mergeCells("A2:E2")
+  r2.font = { name: "Arial", size: 12, bold: true }
+  r2.alignment = { horizontal: "center", vertical: "middle" }
+
+  // Row 3: Blank
+  worksheet.addRow([])
+
+  // Row 4: Kelas & Wali
+  const r4 = worksheet.addRow([
+    `KELAS : ${kelas.toUpperCase()}`,
+    "",
+    "",
+    "",
+    `Wali Kelas : ${waliKelas}`,
+  ])
+  r4.font = { name: "Arial", size: 11 }
+  r4.getCell(5).alignment = { horizontal: "right" }
+
+  // Row 5: Header
+  const r5 = worksheet.addRow(["NO ABS", "NISN", "NAMA SISWA", "L/P", "CATATAN / TAGIHAN TUGAS"])
+  r5.font = { name: "Arial", size: 11, bold: true }
+  r5.alignment = { horizontal: "center", vertical: "middle" }
+
+  const thinBorder: Partial<ExcelJS.Borders> = {
+    top: { style: "thin" },
+    left: { style: "thin" },
+    bottom: { style: "thin" },
+    right: { style: "thin" },
+  }
+
+  for (let col = 1; col <= 5; col++) {
+    const cell = r5.getCell(col)
+    cell.border = thinBorder
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "F3F4F6" },
+    }
+  }
+
+  // Data rows
+  students.forEach((s) => {
+    const r = worksheet.addRow([
+      s.noAbs,
+      s.nisn,
+      s.nama.toUpperCase(),
+      s.gender === "Laki-laki" || s.gender === "L" ? "L" : "P",
+      s.catatan || "-",
+    ])
+    r.font = { name: "Arial", size: 10 }
+    r.getCell(1).alignment = { horizontal: "center", vertical: "top" }
+    r.getCell(2).alignment = { horizontal: "center", vertical: "top" }
+    r.getCell(3).alignment = { horizontal: "left", vertical: "top" }
+    r.getCell(4).alignment = { horizontal: "center", vertical: "top" }
+    r.getCell(5).alignment = { horizontal: "left", vertical: "top", wrapText: true }
+
+    for (let col = 1; col <= 5; col++) {
+      r.getCell(col).border = thinBorder
+    }
+  })
+
+  return workbook
+}
+
+export function generateCatatanBinaanPDFDoc(options: ExportCatatanBinaanOptions): jsPDF {
+  const { students, kelas, tahun = "2025/2026", waliKelas = "-" } = options
+  const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" })
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(14)
+  doc.text("DAFTAR TAGIHAN TUGAS & CATATAN SISWA", 105, 15, { align: "center" })
+
+  doc.setFontSize(11)
+  doc.text(`TAHUN PELAJARAN ${tahun}`, 105, 22, { align: "center" })
+
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(10)
+  doc.text(`KELAS : ${kelas.toUpperCase()}`, 14, 32)
+  doc.text(`Wali Kelas : ${waliKelas}`, 196, 32, { align: "right" })
+
+  autoTable(doc, {
+    startY: 38,
+    head: [["NO", "NISN", "NAMA SISWA", "L/P", "CATATAN / TAGIHAN TUGAS"]],
+    body: students.map((s) => [
+      s.noAbs,
+      s.nisn,
+      s.nama.toUpperCase(),
+      s.gender === "Laki-laki" || s.gender === "L" ? "L" : "P",
+      s.catatan || "-",
+    ]),
+    theme: "grid",
+    styles: {
+      font: "helvetica",
+      fontSize: 9,
+      cellPadding: 2.5,
+    },
+    headStyles: {
+      fillColor: [240, 240, 240],
+      textColor: [0, 0, 0],
+      fontStyle: "bold",
+      halign: "center",
+      lineWidth: 0.2,
+      lineColor: [100, 100, 100],
+    },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 12 },
+      1: { halign: "center", cellWidth: 28 },
+      2: { halign: "left", cellWidth: 50 },
+      3: { halign: "center", cellWidth: 14 },
+      4: { halign: "left", cellWidth: "auto" },
+    },
+  })
+
+  return doc
+}
+
+export async function exportCatatanBinaanToExcel(options: ExportCatatanBinaanOptions) {
+  const workbook = await generateCatatanBinaanExcelWorkbook(options)
+  const filename = `Tagihan_Tugas_Catatan_${options.kelas.toUpperCase()}.xlsx`
+
+  if (typeof window !== "undefined") {
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+}
+
+export function exportCatatanBinaanToPDF(options: ExportCatatanBinaanOptions) {
+  const doc = generateCatatanBinaanPDFDoc(options)
+  const filename = `Tagihan_Tugas_Catatan_${options.kelas.toUpperCase()}.pdf`
+
+  if (typeof window !== "undefined") {
+    doc.save(filename)
+  }
+}
+
+// ====================================================================
+// REKAPAN PRESENSI BULANAN (1 BULAN DALAM 1 LEMBAR LANDSCAPE)
+// ====================================================================
+
+export interface StudentMonthlyAttendance {
+  noAbs: number
+  nisn: string
+  nama: string
+  gender: string
+  dailyStatus: Record<number, string> // day 1..31 -> "HADIR" | "SAKIT" | "IZIN" | "ALPHA" | "DISPEN" | "-"
+  totalHadir: number
+  totalSakit: number
+  totalIzin: number
+  totalAlpha: number
+  totalDispen: number
+  percentage: number
+}
+
+export interface ExportMonthlyPresensiOptions {
+  students: StudentMonthlyAttendance[]
+  kelas: string
+  bulan: number // 1 - 12
+  tahun: number // e.g. 2026
+  waliKelas?: string
+  tahunAjaran?: string
+}
+
+const NAMA_BULAN_INDONESIA = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+]
+
+export async function generateMonthlyPresensiExcelWorkbook(
+  options: ExportMonthlyPresensiOptions
+): Promise<ExcelJS.Workbook> {
+  const { students, kelas, bulan, tahun, waliKelas = "Devy, S.Pd.", tahunAjaran = "2025/2026" } = options
+  const bulanName = NAMA_BULAN_INDONESIA[bulan - 1]
+  const daysInMonth = new Date(tahun, bulan, 0).getDate()
+
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet(`Presensi_${bulanName}_${kelas.toUpperCase()}`)
+
+  // Setup Page Orientation to Landscape
+  worksheet.pageSetup = {
+    orientation: "landscape",
+    paperSize: 9, // A4
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 1,
+  }
+
+  // Column definitions
+  const dayCols = Array.from({ length: daysInMonth }, (_, i) => ({
+    key: `d${i + 1}`,
+    width: 4,
+  }))
+
+  worksheet.columns = [
+    { key: "noAbs", width: 6 },
+    { key: "nisn", width: 14 },
+    { key: "nama", width: 30 },
+    { key: "gender", width: 6 },
+    ...dayCols,
+    { key: "H", width: 6 },
+    { key: "S", width: 6 },
+    { key: "I", width: 6 },
+    { key: "A", width: 6 },
+    { key: "D", width: 6 },
+    { key: "pct", width: 8 },
+  ]
+
+  const totalColCount = 4 + daysInMonth + 6
+
+  // Row 1: Title
+  const r1 = worksheet.addRow(["REKAPITULASI PRESENSI BULANAN SISWA"])
+  worksheet.mergeCells(1, 1, 1, totalColCount)
+  r1.font = { name: "Arial", size: 13, bold: true }
+  r1.alignment = { horizontal: "center", vertical: "middle" }
+
+  // Row 2: Subtitle
+  const r2 = worksheet.addRow([`BULAN : ${bulanName.toUpperCase()} ${tahun}  |  TAHUN PELAJARAN ${tahunAjaran}`])
+  worksheet.mergeCells(2, 1, 2, totalColCount)
+  r2.font = { name: "Arial", size: 11, bold: true }
+  r2.alignment = { horizontal: "center", vertical: "middle" }
+
+  // Row 3: Blank
+  worksheet.addRow([])
+
+  // Row 4: Meta Info (Kelas & Wali Kelas)
+  const r4 = worksheet.addRow([
+    `KELAS : ${kelas.toUpperCase()}`,
+    "",
+    "",
+    "",
+  ])
+  r4.font = { name: "Arial", size: 10, bold: true }
+  const r4Cell = r4.getCell(totalColCount)
+  r4Cell.value = `Wali Kelas : ${waliKelas}`
+  r4Cell.alignment = { horizontal: "right" }
+  r4Cell.font = { name: "Arial", size: 10, bold: true }
+
+  // Headers (Row 5 & 6)
+  const dayHeaders = Array.from({ length: daysInMonth }, (_, i) => String(i + 1))
+  const r5 = worksheet.addRow([
+    "NO", "NISN", "NAMA SISWA", "L/P",
+    ...dayHeaders,
+    "H", "S", "I", "A", "D", "%"
+  ])
+  r5.font = { name: "Arial", size: 9, bold: true }
+  r5.alignment = { horizontal: "center", vertical: "middle" }
+
+  const thinBorder: Partial<ExcelJS.Borders> = {
+    top: { style: "thin" },
+    left: { style: "thin" },
+    bottom: { style: "thin" },
+    right: { style: "thin" },
+  }
+
+  for (let c = 1; c <= totalColCount; c++) {
+    const cell = r5.getCell(c)
+    cell.border = thinBorder
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "F3F4F6" },
+    }
+  }
+
+  // Data rows
+  students.forEach((student) => {
+    const dayVals = Array.from({ length: daysInMonth }, (_, i) => {
+      const dNum = i + 1
+      const st = student.dailyStatus[dNum]
+      if (!st || st === "-") return "-"
+      if (st === "HADIR") return "H"
+      if (st === "SAKIT") return "S"
+      if (st === "IZIN") return "I"
+      if (st === "ALPHA") return "A"
+      if (st === "DISPEN") return "D"
+      return "-"
+    })
+
+    const row = worksheet.addRow([
+      student.noAbs,
+      student.nisn,
+      student.nama.toUpperCase(),
+      student.gender === "Laki-laki" || student.gender === "L" ? "L" : "P",
+      ...dayVals,
+      student.totalHadir,
+      student.totalSakit,
+      student.totalIzin,
+      student.totalAlpha,
+      student.totalDispen,
+      `${student.percentage}%`,
+    ])
+
+    row.font = { name: "Arial", size: 9 }
+    row.getCell(1).alignment = { horizontal: "center" }
+    row.getCell(2).alignment = { horizontal: "center" }
+    row.getCell(3).alignment = { horizontal: "left" }
+    row.getCell(4).alignment = { horizontal: "center" }
+
+    for (let c = 5; c <= 4 + daysInMonth; c++) {
+      row.getCell(c).alignment = { horizontal: "center" }
+    }
+
+    for (let c = 5 + daysInMonth; c <= totalColCount; c++) {
+      row.getCell(c).alignment = { horizontal: "center" }
+    }
+
+    for (let c = 1; c <= totalColCount; c++) {
+      row.getCell(c).border = thinBorder
+    }
+  })
+
+  return workbook
+}
+
+export function generateMonthlyPresensiPDFDoc(options: ExportMonthlyPresensiOptions): jsPDF {
+  const { students, kelas, bulan, tahun, waliKelas = "Devy, S.Pd.", tahunAjaran = "2025/2026" } = options
+  const bulanName = NAMA_BULAN_INDONESIA[bulan - 1]
+  const daysInMonth = new Date(tahun, bulan, 0).getDate()
+
+  // Orientation Landscape A4 (297 x 210 mm)
+  const doc = new jsPDF({ orientation: "l", unit: "mm", format: "a4" })
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(13)
+  doc.text("REKAPITULASI PRESENSI BULANAN SISWA", 148.5, 12, { align: "center" })
+
+  doc.setFontSize(10)
+  doc.text(`BULAN: ${bulanName.toUpperCase()} ${tahun}  |  TAHUN PELAJARAN ${tahunAjaran}`, 148.5, 17, { align: "center" })
+
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(9)
+  doc.text(`KELAS : ${kelas.toUpperCase()}`, 12, 23)
+  doc.text(`Wali Kelas : ${waliKelas}`, 285, 23, { align: "right" })
+
+  const dayHeaders = Array.from({ length: daysInMonth }, (_, i) => String(i + 1))
+  const headers = [
+    "NO", "NISN", "NAMA SISWA", "L/P",
+    ...dayHeaders,
+    "H", "S", "I", "A", "D", "%"
+  ]
+
+  const bodyData = students.map((s) => {
+    const dayCells = Array.from({ length: daysInMonth }, (_, i) => {
+      const dNum = i + 1
+      const st = s.dailyStatus[dNum]
+      if (!st || st === "-") return "-"
+      if (st === "HADIR") return "H"
+      if (st === "SAKIT") return "S"
+      if (st === "IZIN") return "I"
+      if (st === "ALPHA") return "A"
+      if (st === "DISPEN") return "D"
+      return "-"
+    })
+
+    return [
+      s.noAbs,
+      s.nisn,
+      s.nama.toUpperCase(),
+      s.gender === "Laki-laki" || s.gender === "L" ? "L" : "P",
+      ...dayCells,
+      s.totalHadir,
+      s.totalSakit,
+      s.totalIzin,
+      s.totalAlpha,
+      s.totalDispen,
+      `${s.percentage}%`,
+    ]
+  })
+
+  // Dynamic column widths to ensure perfect single page fit
+  const colStyles: Record<number, any> = {
+    0: { halign: "center", cellWidth: 7 },
+    1: { halign: "center", cellWidth: 19 },
+    2: { halign: "left", cellWidth: 42 },
+    3: { halign: "center", cellWidth: 7 },
+  }
+
+  const dayWidth = daysInMonth === 31 ? 4.9 : daysInMonth === 30 ? 5.0 : 5.3
+  for (let i = 4; i < 4 + daysInMonth; i++) {
+    colStyles[i] = { halign: "center", cellWidth: dayWidth }
+  }
+
+  const statStart = 4 + daysInMonth
+  colStyles[statStart] = { halign: "center", cellWidth: 6.5 } // H
+  colStyles[statStart + 1] = { halign: "center", cellWidth: 6.5 } // S
+  colStyles[statStart + 2] = { halign: "center", cellWidth: 6.5 } // I
+  colStyles[statStart + 3] = { halign: "center", cellWidth: 6.5 } // A
+  colStyles[statStart + 4] = { halign: "center", cellWidth: 6.5 } // D
+  colStyles[statStart + 5] = { halign: "center", cellWidth: 9 } // %
+
+  autoTable(doc, {
+    startY: 26,
+    margin: { left: 10, right: 10 },
+    head: [headers],
+    body: bodyData,
+    theme: "grid",
+    styles: {
+      font: "helvetica",
+      fontSize: 6.5,
+      cellPadding: 1.2,
+      overflow: "hidden",
+    },
+    headStyles: {
+      fillColor: [240, 240, 240],
+      textColor: [0, 0, 0],
+      fontStyle: "bold",
+      halign: "center",
+      lineWidth: 0.15,
+      lineColor: [120, 120, 120],
+      fontSize: 6.5,
+    },
+    columnStyles: colStyles,
+  })
+
+  return doc
+}
+
+export async function exportMonthlyPresensiToExcel(options: ExportMonthlyPresensiOptions) {
+  const workbook = await generateMonthlyPresensiExcelWorkbook(options)
+  const bulanName = NAMA_BULAN_INDONESIA[options.bulan - 1]
+  const filename = `Rekap_Presensi_${bulanName}_${options.tahun}_${options.kelas.toUpperCase()}.xlsx`
+
+  if (typeof window !== "undefined") {
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+}
+
+export function exportMonthlyPresensiToPDF(options: ExportMonthlyPresensiOptions) {
+  const doc = generateMonthlyPresensiPDFDoc(options)
+  const bulanName = NAMA_BULAN_INDONESIA[options.bulan - 1]
+  const filename = `Rekap_Presensi_${bulanName}_${options.tahun}_${options.kelas.toUpperCase()}.pdf`
+
+  if (typeof window !== "undefined") {
+    doc.save(filename)
+  }
+}
+
+

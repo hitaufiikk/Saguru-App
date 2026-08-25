@@ -1,0 +1,293 @@
+import { supabase } from "@/lib/supabase"
+
+export interface TaskRecord {
+  id: number
+  title: string
+  mapel: string
+  kelas_code: string
+  created_at?: string
+}
+
+export interface GradeRecord {
+  id?: string
+  task_id: number
+  nisn: string
+  kelas_code: string
+  score: number | null
+  status: string
+}
+
+export const tugasService = {
+  // Fetch task catalog for a class
+  async getTasksByClass(kelasCode: string): Promise<TaskRecord[]> {
+    try {
+      const { data, error } = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("kelas_code", kelasCode.toLowerCase())
+        .order("created_at", { ascending: true })
+
+      if (error) return []
+
+      return (data || []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        mapel: t.mapel || "Matematika",
+        kelas_code: t.kelas_code,
+      }))
+    } catch (err) {
+      return []
+    }
+  },
+
+  // Add new task
+  async addTask(title: string, mapel: string, kelasCode: string): Promise<TaskRecord | null> {
+    try {
+      const { data, error } = await supabase
+        .from("tasks")
+        .insert([
+          {
+            title: title.trim(),
+            mapel: mapel.trim(),
+            kelas_code: kelasCode.toLowerCase(),
+          },
+        ])
+        .select()
+        .single()
+
+      if (error || !data) return null
+      return {
+        id: data.id,
+        title: data.title,
+        mapel: data.mapel,
+        kelas_code: data.kelas_code,
+      }
+    } catch (err) {
+      return null
+    }
+  },
+
+  // Delete task and its associated grades from Supabase
+  async deleteTask(taskId: number, kelasCode: string): Promise<boolean> {
+    try {
+      await supabase
+        .from("grades")
+        .delete()
+        .eq("task_id", taskId)
+        .eq("kelas_code", kelasCode.toLowerCase())
+
+      const { error } = await supabase
+        .from("tasks")
+        .delete()
+        .eq("id", taskId)
+        .eq("kelas_code", kelasCode.toLowerCase())
+
+      return !error
+    } catch (err) {
+      return false
+    }
+  },
+
+  // Fetch grades matrix for a class
+  async getGradesByClass(kelasCode: string): Promise<Record<string, { score: number | null; status: string }>> {
+    try {
+      const { data, error } = await supabase
+        .from("grades")
+        .select("task_id, nisn, score, status, mapel")
+        .eq("kelas_code", kelasCode.toLowerCase())
+
+      if (error) return {}
+
+      const gradeMap: Record<string, { score: number | null; status: string }> = {}
+      ;(data || []).forEach((row) => {
+        const subject = row.mapel || "Matematika"
+        const key = `${row.nisn}_${kelasCode.toLowerCase()}_${subject}_${row.task_id}`
+        gradeMap[key] = {
+          score: row.score !== null ? Number(row.score) : null,
+          status: row.status || "BELUM",
+        }
+      })
+
+      return gradeMap
+    } catch (err) {
+      return {}
+    }
+  },
+
+  // Save/Update student grade
+  async saveGrade(
+    taskId: number,
+    nisn: string,
+    kelasCode: string,
+    score: number | null,
+    status: string,
+    mapel: string = "Matematika"
+  ): Promise<boolean> {
+    try {
+      const targetMapel = mapel || "Matematika"
+      const targetKelas = kelasCode.toLowerCase()
+
+      // 1. Clear existing record to guarantee conflict-free write
+      await supabase
+        .from("grades")
+        .delete()
+        .eq("task_id", taskId)
+        .eq("nisn", nisn)
+        .eq("kelas_code", targetKelas)
+        .eq("mapel", targetMapel)
+
+      // 2. Insert new grade record
+      const { error } = await supabase.from("grades").insert([
+        {
+          task_id: taskId,
+          nisn,
+          kelas_code: targetKelas,
+          mapel: targetMapel,
+          score,
+          status,
+          updated_at: new Date().toISOString(),
+        },
+      ])
+
+      if (error) {
+        console.warn("Supabase saveGrade warning:", error.message)
+      }
+
+      return !error
+    } catch (err) {
+      return false
+    }
+  },
+
+  // Exclude / Hide NISN in Tagihan Tugas (Tugas Soft Delete)
+  async addTugasExclusion(nisn: string, kelasCode: string): Promise<boolean> {
+    try {
+      const { error } = await supabase.from("exclusions").upsert(
+        [
+          {
+            nisn,
+            kelas_code: kelasCode.toLowerCase(),
+            menu_type: "tugas",
+          },
+        ],
+        { onConflict: "nisn,kelas_code,menu_type" }
+      )
+      return !error
+    } catch (err) {
+      return false
+    }
+  },
+
+  // Fetch excluded NISNs in Tagihan Tugas
+  async getTugasExclusions(kelasCode: string): Promise<string[]> {
+    try {
+      const { data, error } = await supabase
+        .from("exclusions")
+        .select("nisn")
+        .eq("kelas_code", kelasCode.toLowerCase())
+        .eq("menu_type", "tugas")
+
+      if (error) return []
+      return (data || []).map((row) => row.nisn)
+    } catch (err) {
+      return []
+    }
+  },
+
+  // Fetch freeform notes for binaan classes (9B, 8H, 8I)
+  async getBinaanNotes(kelasCode: string): Promise<Record<string, string>> {
+    try {
+      const targetKelas = kelasCode.toLowerCase()
+      // Try fetching from binaan_notes table first
+      const { data, error } = await supabase
+        .from("binaan_notes")
+        .select("nisn, catatan")
+        .eq("kelas_code", targetKelas)
+
+      if (!error && data) {
+        const noteMap: Record<string, string> = {}
+        data.forEach((row) => {
+          if (row.nisn) {
+            noteMap[row.nisn] = row.catatan || ""
+          }
+        })
+        return noteMap
+      }
+
+      // Fallback: Check grades table
+      const { data: gradesData, error: gradesError } = await supabase
+        .from("grades")
+        .select("nisn, status")
+        .eq("kelas_code", targetKelas)
+        .eq("task_id", 0)
+        .eq("mapel", "CatatanBinaan")
+
+      if (gradesError || !gradesData) return {}
+
+      const fallbackMap: Record<string, string> = {}
+      gradesData.forEach((row) => {
+        if (row.nisn) {
+          fallbackMap[row.nisn] = row.status || ""
+        }
+      })
+      return fallbackMap
+    } catch {
+      return {}
+    }
+  },
+
+  // Save freeform note for a student in binaan class (multi-device sync)
+  async saveBinaanNote(
+    nisn: string,
+    kelasCode: string,
+    note: string
+  ): Promise<boolean> {
+    try {
+      const targetKelas = kelasCode.toLowerCase()
+
+      // 1. Primary: Upsert into dedicated binaan_notes table
+      const { error: binaanError } = await supabase
+        .from("binaan_notes")
+        .upsert(
+          [
+            {
+              nisn,
+              kelas_code: targetKelas,
+              catatan: note,
+              updated_at: new Date().toISOString(),
+            },
+          ],
+          { onConflict: "nisn,kelas_code" }
+        )
+
+      if (!binaanError) {
+        return true
+      }
+
+      // 2. Fallback if binaan_notes table is pending schema creation
+      await supabase
+        .from("grades")
+        .delete()
+        .eq("task_id", 0)
+        .eq("nisn", nisn)
+        .eq("kelas_code", targetKelas)
+        .eq("mapel", "CatatanBinaan")
+
+      const { error: gradeErr } = await supabase.from("grades").insert([
+        {
+          task_id: 0,
+          nisn,
+          kelas_code: targetKelas,
+          mapel: "CatatanBinaan",
+          score: null,
+          status: note,
+          updated_at: new Date().toISOString(),
+        },
+      ])
+
+      return !gradeErr
+    } catch {
+      return false
+    }
+  },
+}
