@@ -2,7 +2,7 @@
 
 import { useState, useRef, useMemo } from "react"
 import Link from "next/link"
-import * as XLSX from "xlsx"
+import { parseSpreadsheetData, ParsedStudentRow } from "@/lib/import-utils"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -198,182 +198,21 @@ export function MigrasiDataForm() {
             setTotalRows(18)
           }
         } else {
-          // Parse Excel / CSV files with multi-row header scanning
+          // Parse Excel (.xlsx, .xls) / CSV files via modul produksi parseSpreadsheetData
           const buffer = await file.arrayBuffer()
-          const workbook = XLSX.read(buffer, { type: "array" })
-          const firstSheetName = workbook.SheetNames[0]
-          const worksheet = workbook.Sheets[firstSheetName]
-          const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 })
+          const result = parseSpreadsheetData(buffer)
 
-          if (rawRows && rawRows.length > 0) {
-            let namaIdx = -1
-            let nisnIdx = -1
-            let genderIdx = -1
-            let dataStartRowIdx = -1
+          if (result.error) {
+            alert(result.error)
+            setIsLoadingFile(false)
+            return
+          }
 
-            // 1. Scan top 15 rows for column headers (handling merged/stacked headers like "NO INDUK", "NAMA")
-            for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
-              const row = rawRows[r]
-              if (!row || !Array.isArray(row)) continue
-
-              row.forEach((cellVal: any, cIdx: number) => {
-                const cellStr = String(cellVal || "").toLowerCase().trim()
-                if (!cellStr) return
-
-                // Check NISN / NO INDUK keywords
-                if (
-                  nisnIdx === -1 &&
-                  (cellStr.includes("nisn") ||
-                    cellStr.includes("nis") ||
-                    cellStr.includes("induk") ||
-                    cellStr.includes("nipd") ||
-                    cellStr.includes("nik"))
-                ) {
-                  nisnIdx = cIdx
-                }
-
-                // Check NAMA keywords
-                if (
-                  namaIdx === -1 &&
-                  (cellStr.includes("nama") ||
-                    cellStr.includes("peserta didik") ||
-                    cellStr.includes("siswa"))
-                ) {
-                  namaIdx = cIdx
-                }
-
-                // Check GENDER / L/P keywords
-                if (
-                  genderIdx === -1 &&
-                  (cellStr.includes("l/p") ||
-                    cellStr.includes("l / p") ||
-                    cellStr.includes("jenis") ||
-                    cellStr.includes("kelamin") ||
-                    cellStr.includes("jk") ||
-                    cellStr.includes("gender"))
-                ) {
-                  genderIdx = cIdx
-                }
-              })
-
-              if (namaIdx !== -1 || nisnIdx !== -1) {
-                dataStartRowIdx = r + 1
-              }
-            }
-
-            // 2. If headers were not matched by keyword, auto-discover by content scanning
-            if (namaIdx === -1 || nisnIdx === -1 || genderIdx === -1) {
-              for (let r = 0; r < Math.min(rawRows.length, 25); r++) {
-                const row = rawRows[r]
-                if (!row || !Array.isArray(row)) continue
-
-                row.forEach((cellVal: any, cIdx: number) => {
-                  const val = String(cellVal || "").trim()
-                  if (!val) return
-
-                  // Auto NISN: Any 3-16 digit number
-                  if (nisnIdx === -1 && /^\d{3,16}$/.test(val)) {
-                    nisnIdx = cIdx
-                  }
-
-                  // Auto Gender: exact L/P or Laki-laki/Perempuan
-                  if (
-                    genderIdx === -1 &&
-                    /^(L|P|LAKI-LAKI|PEREMPUAN|COWOK|CEWEK|M|F)$/i.test(val)
-                  ) {
-                    genderIdx = cIdx
-                  }
-
-                  // Auto Nama: String of words with letters, not a number, not gender
-                  if (
-                    namaIdx === -1 &&
-                    /^[A-Za-z\s'.,-]{3,50}$/.test(val) &&
-                    !/^(L|P|LAKI-LAKI|PEREMPUAN|COWOK|CEWEK|NO|NISN|INDUK|NAMA|Halaman)$/i.test(val) &&
-                    !/^\d+$/.test(val)
-                  ) {
-                    namaIdx = cIdx
-                  }
-                })
-              }
-            }
-
-            // Fallback defaults if still unfound
-            if (nisnIdx === -1) nisnIdx = 1
-            if (namaIdx === -1) namaIdx = 2
-            if (genderIdx === -1) genderIdx = 3
-
-            // Find first row containing real student data
-            let firstDataRow = dataStartRowIdx > 0 ? dataStartRowIdx : 0
-            for (let r = 0; r < rawRows.length; r++) {
-              const row = rawRows[r]
-              if (!row) continue
-              const nisnVal = String(row[nisnIdx] || "").trim()
-              const namaVal = String(row[namaIdx] || "").trim()
-
-              if (
-                (/^\d{3,16}$/.test(nisnVal) || (namaVal && namaVal.length >= 2)) &&
-                !/^(no|nisn|nama|jenis|kelamin|l\/p|induk|nomor|page|halaman|kementerian|sekolah|daftar|rekap)/i.test(namaVal) &&
-                !/^(no|nisn|nama|jenis|kelamin|l\/p|induk|nomor)/i.test(nisnVal)
-              ) {
-                firstDataRow = r
-                break
-              }
-            }
-
-            const rowsData: ParsedRow[] = []
-
-            for (let i = firstDataRow; i < rawRows.length; i++) {
-              const row = rawRows[i]
-              if (!row || !Array.isArray(row) || row.length === 0) continue
-
-              const rawNisn = String(row[nisnIdx] !== undefined ? row[nisnIdx] : "").trim()
-              const rawNama = String(row[namaIdx] !== undefined ? row[namaIdx] : "").trim()
-              const rawGender = String(row[genderIdx] !== undefined ? row[genderIdx] : "").trim()
-
-              if (!rawNama && !rawNisn) continue
-
-              // Ignore header labels or title rows
-              if (
-                /^(no|nisn|nama|jenis|kelamin|l\/p|induk|nomor|page|halaman|kementerian|sekolah|daftar|rekap)/i.test(rawNama) ||
-                /^(no|nisn|nama|jenis|kelamin|l\/p|induk|nomor)/i.test(rawNisn)
-              ) {
-                continue
-              }
-
-              // Extract exact raw NISN digits directly from file
-              const cleanNisnDigits = rawNisn.replace(/[^\d]/g, "")
-              const finalNisn = cleanNisnDigits
-                ? cleanNisnDigits
-                : (rawNisn && !/^(nisn|nis|induk|no)/i.test(rawNisn) ? rawNisn : `00812345${rowsData.length + 1}`)
-
-              // Extract gender
-              let finalGender = "Laki-laki"
-              const gUpper = rawGender.toUpperCase()
-              if (gUpper.startsWith("P") || gUpper === "PEREMPUAN" || gUpper === "CEWEK" || gUpper === "F") {
-                finalGender = "Perempuan"
-              }
-
-              // Clean name string
-              const cleanNama = rawNama
-                .replace(/[\d]/g, "")
-                .replace(/\s+/g, " ")
-                .trim()
-
-              if (cleanNama.length >= 2) {
-                rowsData.push({
-                  noAbs: rowsData.length + 1,
-                  nisn: finalNisn,
-                  nama: cleanNama,
-                  gender: finalGender,
-                  status: "HADIR",
-                })
-              }
-            }
-
-            if (rowsData.length > 0) {
-              setParsedData(rowsData)
-              setTotalRows(rowsData.length)
-            }
+          if (result.rowsData && result.rowsData.length > 0) {
+            setParsedData(result.rowsData)
+            setTotalRows(result.totalRows)
+          } else {
+            alert("Tidak ditemukan data siswa yang valid pada berkas tersebut.")
           }
         }
       } catch (err) {
