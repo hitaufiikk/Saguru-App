@@ -71,22 +71,14 @@ export const studentService = {
   },
 
   // Batch insert/upsert migrated students from Excel/PDF
-  async saveMigratedStudents(
-    students: StudentRecord[],
-    kelasCode: string,
-    waliKelas: string
-  ): Promise<{ success: boolean; count: number; error?: string }> {
+  async saveMigratedStudents(students: StudentRecord[], kelasCode: string, waliKelas: string): Promise<boolean> {
     try {
       // 1. Validasi identitas sebelum data dikirim ke Supabase
       // Baris dengan identitas kosong, spasi, atau duplikat disaring
       const validation = validateStudentsForSave(students as any)
       if (validation.validStudents.length === 0) {
         console.warn("saveMigratedStudents: Tidak ada siswa dengan identitas valid untuk disimpan.")
-        return {
-          success: false,
-          count: 0,
-          error: "Tidak ada siswa dengan identitas valid untuk disimpan (identitas kosong atau duplikat).",
-        }
+        return false
       }
 
       // 2. Format payload: HANYA kolom resmi tabel Supabase 'students'
@@ -105,16 +97,12 @@ export const studentService = {
 
       if (error) {
         console.error("Supabase batch upsert error:", error.message)
-        return { success: false, count: 0, error: error.message }
+        return false
       }
-      return { success: true, count: formatted.length }
-    } catch (err: any) {
+      return true
+    } catch (err) {
       console.error("Error in saveMigratedStudents:", err)
-      return {
-        success: false,
-        count: 0,
-        error: err?.message || "Terjadi kesalahan saat menyimpan data migrasi.",
-      }
+      return false
     }
   },
 

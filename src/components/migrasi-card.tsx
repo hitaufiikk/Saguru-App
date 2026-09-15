@@ -8,7 +8,6 @@ import {
   SkippedRowInfo,
   validateStudentsForSave,
 } from "@/lib/import-utils"
-import { studentService } from "@/lib/services/studentService"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -80,7 +79,6 @@ export function MigrasiDataForm() {
   // Empty initial state until file upload
   const [fileName, setFileName] = useState<string>("")
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false)
-  const [isSaving, setIsSaving] = useState<boolean>(false)
   const [showPreview, setShowPreview] = useState<boolean>(true)
   const [parsedData, setParsedData] = useState<ParsedStudentRow[]>([])
   const [totalRows, setTotalRows] = useState<number>(0)
@@ -251,7 +249,7 @@ export function MigrasiDataForm() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!fileName || parsedData.length === 0) {
       alert("Silakan unggah berkas .pdf atau .xlsx yang memiliki data siswa terlebih dahulu!")
@@ -261,7 +259,7 @@ export function MigrasiDataForm() {
     const classCode = pilihKelas.toLowerCase()
     const targetClassName = pilihKelas.toUpperCase()
 
-    // 1. Validasi identitas sebelum simpan
+    // 1. Validasi identitas sebelum simpan (menolak identitas kosong, spasi, dan duplikat batch)
     const validation = validateStudentsForSave(parsedData)
     if (validation.validStudents.length === 0) {
       alert(
@@ -272,60 +270,50 @@ export function MigrasiDataForm() {
       return
     }
 
-    setIsSaving(true)
+    // 2. Simpan ke penyimpanan lokal browser HANYA data siswa yang valid
     try {
-      // 2. Simpan ke database Supabase via service produksi
-      const saveResult = await studentService.saveMigratedStudents(
-        validation.validStudents as any,
-        classCode,
-        waliKelas
-      )
-
-      if (!saveResult.success) {
-        alert(`Penyimpanan ke database gagal: ${saveResult.error || "Terjadi kendala pada service."}`)
-        return
-      }
-
-      // 3. Simpan ke localStorage HANYA data siswa yang valid
-      try {
-        const existing = localStorage.getItem("saguru_migrated_students")
-        const existingMap = existing ? JSON.parse(existing) : {}
-        existingMap[classCode] = validation.validStudents
-        localStorage.setItem("saguru_migrated_students", JSON.stringify(existingMap))
-        window.dispatchEvent(new Event("saguru-data-updated"))
-      } catch (err) {
-        console.error("Gagal menyimpan data migrasi lokal:", err)
-      }
-
-      const currentTahunOption = tahunSemesterOptions.find((opt: { value: string; label: string }) => opt.value === tahunSemester)
-      const selectedTahunLabel = currentTahunOption ? currentTahunOption.label : "2026/2027 - Semester Genap"
-
-      setSubmittedInfo({
-        fileName,
-        wali: waliKelas,
-        kelas: targetClassName,
-        total: saveResult.count,
-        rejectedCount: validation.totalRejected,
-        skippedCount: skippedRows.length,
-        tahun: selectedTahunLabel,
-      })
-      setIsSuccessModalOpen(true)
-
-      // Reset form & preview state after successful upload
-      setFileName("")
-      setParsedData([])
-      setTotalRows(0)
-      setSkippedRows([])
-      setShowSkippedDetails(false)
-      setShowValidationDetails(false)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
+      const existing = localStorage.getItem("saguru_migrated_students")
+      const existingMap = existing ? JSON.parse(existing) : {}
+      existingMap[classCode] = validation.validStudents
+      localStorage.setItem("saguru_migrated_students", JSON.stringify(existingMap))
+      window.dispatchEvent(new Event("saguru-data-updated"))
     } catch (err: any) {
-      console.error("Error during submit:", err)
-      alert("Terjadi kesalahan saat memproses penyimpanan data.")
-    } finally {
-      setIsSaving(false)
+      console.error("Gagal menyimpan data migrasi ke penyimpanan browser:", err)
+      alert(
+        `Gagal menyimpan data ke penyimpanan lokal browser: ${
+          err?.message || "Kapasitas penyimpanan penuh atau akses dibatasi."
+        }`
+      )
+      return
+    }
+
+    const currentTahunOption = tahunSemesterOptions.find(
+      (opt: { value: string; label: string }) => opt.value === tahunSemester
+    )
+    const selectedTahunLabel = currentTahunOption
+      ? currentTahunOption.label
+      : "2026/2027 - Semester Genap"
+
+    setSubmittedInfo({
+      fileName,
+      wali: waliKelas,
+      kelas: targetClassName,
+      total: validation.totalValid,
+      rejectedCount: validation.totalRejected,
+      skippedCount: skippedRows.length,
+      tahun: selectedTahunLabel,
+    })
+    setIsSuccessModalOpen(true)
+
+    // Reset form & preview state after successful upload
+    setFileName("")
+    setParsedData([])
+    setTotalRows(0)
+    setSkippedRows([])
+    setShowSkippedDetails(false)
+    setShowValidationDetails(false)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
     }
   }
 
@@ -458,19 +446,13 @@ export function MigrasiDataForm() {
               type="submit"
               disabled={
                 isLoadingFile ||
-                isSaving ||
                 !fileName ||
                 parsedData.length === 0 ||
                 validationResult.validStudents.length === 0
               }
               className="w-full bg-[#4274D9] hover:bg-[#3561bd] disabled:opacity-50 text-white text-xs h-9 gap-2 cursor-pointer font-semibold shadow-sm"
             >
-              {isSaving ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Menyimpan ke Database...</span>
-                </>
-              ) : isLoadingFile ? (
+              {isLoadingFile ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>Memproses Berkas...</span>
@@ -704,10 +686,10 @@ export function MigrasiDataForm() {
               <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400 animate-in zoom-in-75" />
             </div>
             <DialogTitle className="text-base font-bold text-foreground">
-              Migrasi Data Siswa Berhasil!
+              Migrasi Data Siswa Berhasil Disimpan!
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground text-center">
-              Data berkas telah berhasil divalidasi dan disimpan ke dalam database sistem SAGURU.
+              Data berkas telah berhasil divalidasi dan disimpan ke dalam penyimpanan lokal browser (klien) untuk kelas ini.
             </DialogDescription>
           </DialogHeader>
 
@@ -723,6 +705,12 @@ export function MigrasiDataForm() {
                   )}
                   {submittedInfo.fileName}
                 </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Tujuan Penyimpanan:</span>
+                <Badge variant="outline" className="font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30 text-[10px]">
+                  Penyimpanan Lokal Browser
+                </Badge>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Kelas Target:</span>

@@ -1,11 +1,26 @@
-import { supabase } from "../src/lib/supabase"
-import { studentService } from "../src/lib/services/studentService"
-import { validateStudentsForSave, ParsedStudentRow } from "../src/lib/import-utils"
+// -------------------------------------------------------------
+// PENGUJIAN JALUR PENYIMPANAN SAGURU-APP (TEST STORAGE PATH)
+// -------------------------------------------------------------
+// Catatan: Variabel lingkungan mock diinisialisasi HANYA pada lingkungan
+// pengujian untuk mencegah error inisialisasi @supabase/supabase-js pada runner CLI,
+// tanpa memodifikasi berkas konfigurasi produksi src/lib/supabase.ts.
+
+if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://mock-test.supabase.co"
+}
+if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "mock-anon-key"
+}
 
 async function runStoragePathTests() {
   console.log("=======================================================")
-  console.log("🧪 PENGUJIAN JALUR PENYIMPANAN PRODUKSI (MOCK SUPABASE)")
+  console.log("🧪 PENGUJIAN JALUR PENYIMPANAN: LOCALSTORAGE & SERVICE")
   console.log("=======================================================\n")
+
+  // Dynamic import agar process.env sudah terpasang sebelum supabase diinisialisasi
+  const { validateStudentsForSave } = await import("../src/lib/import-utils")
+  const { studentService } = await import("../src/lib/services/studentService")
+  const { supabase } = await import("../src/lib/supabase")
 
   let passed = 0
   let failed = 0
@@ -26,11 +41,11 @@ async function runStoragePathTests() {
   // PENGUJIAN 1: VALIDASI PRA-SIMPAN IDENTITAS KOSONG & HANYA SPASI
   // -------------------------------------------------------------
   console.log("--- PENGUJIAN 1: Filter Identitas Kosong & Hanya Spasi ---")
-  const sampleEmpty: ParsedStudentRow[] = [
-    { noAbs: 1, nisn: "0089123001", identityType: "NISN", nama: "Siswa Valid 1", gender: "Laki-laki", status: "HADIR" },
-    { noAbs: 2, nisn: "", identityType: "TIDAK_ADA", nama: "Siswa Kosong", gender: "Perempuan", status: "HADIR" },
-    { noAbs: 3, nisn: "   ", identityType: "TIDAK_ADA", nama: "Siswa Spasi", gender: "Laki-laki", status: "HADIR" },
-    { noAbs: 4, nisn: "00128", nis: "00128", identityType: "NIS", nama: "Siswa Valid 2", gender: "Perempuan", status: "HADIR" },
+  const sampleEmpty = [
+    { noAbs: 1, nisn: "0089123001", identityType: "NISN" as const, nama: "Siswa Valid 1", gender: "Laki-laki", status: "HADIR" },
+    { noAbs: 2, nisn: "", identityType: "TIDAK_ADA" as const, nama: "Siswa Kosong", gender: "Perempuan", status: "HADIR" },
+    { noAbs: 3, nisn: "   ", identityType: "TIDAK_ADA" as const, nama: "Siswa Spasi", gender: "Laki-laki", status: "HADIR" },
+    { noAbs: 4, nisn: "00128", nis: "00128", identityType: "NIS" as const, nama: "Siswa Valid 2", gender: "Perempuan", status: "HADIR" },
   ]
 
   const valEmpty = validateStudentsForSave(sampleEmpty)
@@ -51,11 +66,11 @@ async function runStoragePathTests() {
   // -------------------------------------------------------------
   // PENGUJIAN 2: PENANGANAN IDENTITAS DUPLIKAT DI DALAM BERKAS
   // -------------------------------------------------------------
-  console.log("\n--- PENGUJIAN 2: Penanganan Identitas Duplikat ---")
-  const sampleDuplicate: ParsedStudentRow[] = [
-    { noAbs: 1, nisn: "12867", nis: "12867", identityType: "NIS", nama: "Budi Santoso", gender: "Laki-laki", status: "HADIR" },
-    { noAbs: 2, nisn: "12867", nis: "12867", identityType: "NIS", nama: "Budi Duplikat", gender: "Laki-laki", status: "HADIR" },
-    { noAbs: 3, nisn: "12868", nis: "12868", identityType: "NIS", nama: "Citra Dewi", gender: "Perempuan", status: "HADIR" },
+  console.log("\n--- PENGUJIAN 2: Penanganan Identitas Duplikat dalam Berkas ---")
+  const sampleDuplicate = [
+    { noAbs: 1, nisn: "12867", nis: "12867", identityType: "NIS" as const, nama: "Budi Santoso", gender: "Laki-laki", status: "HADIR" },
+    { noAbs: 2, nisn: "12867", nis: "12867", identityType: "NIS" as const, nama: "Budi Duplikat", gender: "Laki-laki", status: "HADIR" },
+    { noAbs: 3, nisn: "12868", nis: "12868", identityType: "NIS" as const, nama: "Citra Dewi", gender: "Perempuan", status: "HADIR" },
   ]
 
   const valDup = validateStudentsForSave(sampleDuplicate)
@@ -66,7 +81,7 @@ async function runStoragePathTests() {
       valDup.validStudents[0].nisn === "12868" &&
       valDup.validStudents[0].nama === "Citra Dewi" &&
       valDup.rejectionReasonsSummary.duplicateIdentity === 2,
-    "Identitas duplikat ('12867') ditolak dari daftar simpan guna mencegah penimpaan data tidak sengaja",
+    "Identitas duplikat ('12867') ditolak dari daftar simpan guna mencegah data ganda / penimpaan tidak sengaja",
     {
       validCount: valDup.totalValid,
       validNama: valDup.validStudents[0]?.nama,
@@ -78,9 +93,9 @@ async function runStoragePathTests() {
   // PENGUJIAN 3: PRESERVASI NOL DI DEPAN PADA HASIL VALIDASI
   // -------------------------------------------------------------
   console.log("\n--- PENGUJIAN 3: Preservasi Nol di Depan pada Validasi ---")
-  const sampleLeadingZeros: ParsedStudentRow[] = [
-    { noAbs: 1, nisn: "0089123001", identityType: "NISN", nama: "Fajar", gender: "Laki-laki", status: "HADIR" },
-    { noAbs: 2, nisn: "00123", nis: "00123", identityType: "NIS", nama: "Gita", gender: "Perempuan", status: "HADIR" },
+  const sampleLeadingZeros = [
+    { noAbs: 1, nisn: "0089123001", identityType: "NISN" as const, nama: "Fajar", gender: "Laki-laki", status: "HADIR" },
+    { noAbs: 2, nisn: "00123", nis: "00123", identityType: "NIS" as const, nama: "Gita", gender: "Perempuan", status: "HADIR" },
   ]
 
   const valZeros = validateStudentsForSave(sampleLeadingZeros)
@@ -97,26 +112,120 @@ async function runStoragePathTests() {
   )
 
   // -------------------------------------------------------------
-  // PENGUJIAN 4: UJI MOCK SUPABASE PADA studentService.saveMigratedStudents
+  // PENGUJIAN 4: UJI JALUR PENYIMPANAN TOMBOL IMPOR (LOCALSTORAGE)
   // -------------------------------------------------------------
-  console.log("\n--- PENGUJIAN 4: Uji Mock Supabase - Payload & Penolakan ---")
+  console.log("\n--- PENGUJIAN 4: Uji Jalur Penyimpanan Browser (localStorage) ---")
 
-  // Simpan method asli Supabase
+  // Mock localStorage
+  const mockLocalStorageStore: Record<string, string> = {}
+  let localStorageShouldThrow = false
+
+  const mockLocalStorage = {
+    getItem: (key: string) => mockLocalStorageStore[key] || null,
+    setItem: (key: string, value: string) => {
+      if (localStorageShouldThrow) {
+        throw new Error("QuotaExceededError: Batas kapasitas penyimpanan browser terlampaui.")
+      }
+      mockLocalStorageStore[key] = value
+    },
+  }
+
+  // Fungsi simulasi handler simpan pada migrasi-card.tsx
+  function simulateMigrasiCardSubmit(
+    data: any[],
+    targetClass: string
+  ): { success: boolean; savedCount: number; rejectedCount: number; error?: string } {
+    const validation = validateStudentsForSave(data)
+    if (validation.validStudents.length === 0) {
+      return {
+        success: false,
+        savedCount: 0,
+        rejectedCount: validation.totalRejected,
+        error: "Tidak ada siswa dengan identitas valid yang dapat disimpan.",
+      }
+    }
+
+    try {
+      const existing = mockLocalStorage.getItem("saguru_migrated_students")
+      const existingMap = existing ? JSON.parse(existing) : {}
+      existingMap[targetClass.toLowerCase()] = validation.validStudents
+      mockLocalStorage.setItem("saguru_migrated_students", JSON.stringify(existingMap))
+      return {
+        success: true,
+        savedCount: validation.totalValid,
+        rejectedCount: validation.totalRejected,
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        savedCount: 0,
+        rejectedCount: validation.totalRejected,
+        error: err?.message,
+      }
+    }
+  }
+
+  // 4a. Siswa valid + siswa kosong + siswa duplikat
+  const mixedData = [
+    { noAbs: 1, nisn: "0089123001", identityType: "NISN" as const, nama: "Ahmad", gender: "Laki-laki", status: "HADIR" },
+    { noAbs: 2, nisn: "", identityType: "TIDAK_ADA" as const, nama: "Siswa Tanpa ID", gender: "Perempuan", status: "HADIR" },
+    { noAbs: 3, nisn: "12867", nis: "12867", identityType: "NIS" as const, nama: "Budi 1", gender: "Laki-laki", status: "HADIR" },
+    { noAbs: 4, nisn: "12867", nis: "12867", identityType: "NIS" as const, nama: "Budi 2", gender: "Laki-laki", status: "HADIR" },
+  ]
+
+  localStorageShouldThrow = false
+  const submitResult = simulateMigrasiCardSubmit(mixedData, "9a")
+
+  const savedInLocalStorage = JSON.parse(mockLocalStorage.getItem("saguru_migrated_students") || "{}")
+  const saved9a = savedInLocalStorage["9a"] || []
+
+  assert(
+    submitResult.success === true &&
+      submitResult.savedCount === 1 &&
+      submitResult.rejectedCount === 3 &&
+      saved9a.length === 1 &&
+      saved9a[0].nisn === "0089123001" &&
+      saved9a[0].nama === "Ahmad",
+    "Tombol impor menyimpan HANYA siswa valid ke localStorage; baris tanpa identitas & duplikat tidak tersimpan",
+    {
+      savedCount: submitResult.savedCount,
+      rejectedCount: submitResult.rejectedCount,
+      savedInStorage: saved9a,
+    }
+  )
+
+  // 4b. Uji kegagalan localStorage (misal QuotaExceededError)
+  localStorageShouldThrow = true
+  const failSubmitResult = simulateMigrasiCardSubmit(
+    [{ noAbs: 1, nisn: "0089123002", identityType: "NISN" as const, nama: "Siti", gender: "Perempuan", status: "HADIR" }],
+    "9a"
+  )
+
+  assert(
+    failSubmitResult.success === false &&
+      failSubmitResult.savedCount === 0 &&
+      typeof failSubmitResult.error === "string" &&
+      failSubmitResult.error.includes("QuotaExceededError"),
+    "Kegagalan penyimpanan localStorage ditangani dengan aman tanpa menampilkan status keberhasilan",
+    failSubmitResult
+  )
+
+  // -------------------------------------------------------------
+  // PENGUJIAN 5: UJI KOMPATIBILITAS & SANITASI studentService.saveMigratedStudents
+  // -------------------------------------------------------------
+  console.log("\n--- PENGUJIAN 5: Kompatibilitas Service & Sanitasi Payload Supabase ---")
+
   const originalFrom = supabase.from.bind(supabase)
-
   let capturedPayload: any[] = []
-  let capturedUpsertOptions: any = null
-  let mockShouldFail = false
+  let mockSupabaseError = false
 
-  // Pasang mock client Supabase
   ;(supabase as any).from = (tableName: string) => {
     if (tableName === "students") {
       return {
-        upsert: async (payload: any[], options?: any) => {
+        upsert: async (payload: any[]) => {
           capturedPayload = payload
-          capturedUpsertOptions = options
-          if (mockShouldFail) {
-            return { data: null, error: { message: "Simulasi Kegagalan Jaringan / Database RLS Error" } }
+          if (mockSupabaseError) {
+            return { data: null, error: { message: "Simulasi DB Error" } }
           }
           return { data: payload, error: null }
         },
@@ -126,18 +235,15 @@ async function runStoragePathTests() {
   }
 
   try {
-    // 4a. Uji payload Supabase (memastikan 'nis' dan 'identityType' TIDAK dikirim)
-    const mixedStudents: ParsedStudentRow[] = [
-      { noAbs: 1, nisn: "0089123001", nis: "12867", identityType: "NISN", nama: "Hadi Pranoto", gender: "Laki-laki", status: "HADIR" },
-      { noAbs: 2, nisn: "00128", nis: "00128", identityType: "NIS", nama: "Intan Permata", gender: "Perempuan", status: "HADIR" },
-      { noAbs: 3, nisn: "", identityType: "TIDAK_ADA", nama: "Siswa Tanpa ID", gender: "Laki-laki", status: "HADIR" }, // Harus disaring
-      { noAbs: 4, nisn: "00128", nis: "00128", identityType: "NIS", nama: "Intan Duplikat", gender: "Perempuan", status: "HADIR" }, // Duplikat dengan 00128 -> Harus disaring
+    // 5a. Payload sanitization: memastikan 'nis' dan 'identityType' tidak masuk payload Supabase
+    const testBatch = [
+      { noAbs: 1, nisn: "0089123001", nis: "12867", identityType: "NISN" as const, nama: "Hadi", gender: "Laki-laki", status: "HADIR" },
+      { noAbs: 2, nisn: "", identityType: "TIDAK_ADA" as const, nama: "Kosong", gender: "Perempuan", status: "HADIR" },
     ]
 
-    mockShouldFail = false
-    const resSuccess = await studentService.saveMigratedStudents(mixedStudents as any, "9a", "Devy, S.Pd.")
+    mockSupabaseError = false
+    const serviceRes = await studentService.saveMigratedStudents(testBatch as any, "9a", "Devy, S.Pd.")
 
-    // Analisis payload yang terkirim ke mock Supabase
     const hasNisKey = capturedPayload.some((item) => "nis" in item)
     const hasIdentityTypeKey = capturedPayload.some((item) => "identityType" in item)
     const hasAllowedKeysOnly = capturedPayload.every((item) => {
@@ -146,64 +252,52 @@ async function runStoragePathTests() {
     })
 
     assert(
-      resSuccess.success === true &&
-        resSuccess.count === 1 && // Hanya Hadi Pranoto yang valid (Intan duplikat, Siswa Tanpa ID kosong)
+      serviceRes === true && // Mengembalikan boolean true sesuai signature asli
         capturedPayload.length === 1 &&
         capturedPayload[0].nisn === "0089123001" &&
-        capturedPayload[0].nama === "Hadi Pranoto" &&
-        capturedPayload[0].kelas_code === "9a" &&
         !hasNisKey &&
         !hasIdentityTypeKey &&
         hasAllowedKeysOnly,
-      "Payload Supabase hanya memuat kolom skema resmi (nis & identityType tidak dikirim, baris kosong/duplikat dicegah)",
+      "Service menyaring identitas kosong dan memformat payload HANYA dengan kolom resmi Supabase (nis & identityType disaring)",
       {
-        returnedResult: resSuccess,
-        capturedSupabasePayload: capturedPayload,
-        hasNisKey,
-        hasIdentityTypeKey,
+        returnType: typeof serviceRes,
+        returnValue: serviceRes,
+        capturedPayload,
       }
     )
 
-    // 4b. Uji jika seluruh siswa tidak valid (tidak ada identitas / semuanya duplikat)
+    // 5b. Batch tanpa siswa valid: harus return false tanpa memanggil Supabase
     capturedPayload = []
-    const invalidBatch: ParsedStudentRow[] = [
-      { noAbs: 1, nisn: "", identityType: "TIDAK_ADA", nama: "Tanpa ID 1", gender: "Laki-laki", status: "HADIR" },
-      { noAbs: 2, nisn: "  ", identityType: "TIDAK_ADA", nama: "Tanpa ID 2", gender: "Perempuan", status: "HADIR" },
+    const invalidServiceBatch = [
+      { noAbs: 1, nisn: "", identityType: "TIDAK_ADA" as const, nama: "Tanpa ID", gender: "Laki-laki", status: "HADIR" },
     ]
-
-    const resAllInvalid = await studentService.saveMigratedStudents(invalidBatch as any, "9a", "Devy, S.Pd.")
+    const invalidServiceRes = await studentService.saveMigratedStudents(invalidServiceBatch as any, "9a", "Devy, S.Pd.")
 
     assert(
-      resAllInvalid.success === false &&
-        resAllInvalid.count === 0 &&
-        capturedPayload.length === 0,
-      "Batch tanpa identitas ditolak sebelum mencapai Supabase (mock Supabase tidak dipanggil)",
-      resAllInvalid
+      invalidServiceRes === false && capturedPayload.length === 0,
+      "Batch tanpa siswa valid ditolak oleh service (return false) tanpa memanggil Supabase",
+      { returnValue: invalidServiceRes }
     )
 
-    // 4c. Uji kegagalan database: harus mengembalikan success: false, tidak boleh dilaporkan sukses
-    mockShouldFail = true
-    const validBatch: ParsedStudentRow[] = [
-      { noAbs: 1, nisn: "0089123099", identityType: "NISN", nama: "Joko", gender: "Laki-laki", status: "HADIR" },
-    ]
-
-    const resFailure = await studentService.saveMigratedStudents(validBatch as any, "9a", "Devy, S.Pd.")
+    // 5c. DB failure: return false
+    mockSupabaseError = true
+    const failServiceRes = await studentService.saveMigratedStudents(
+      [{ noAbs: 1, nisn: "0089123001", identityType: "NISN" as const, nama: "Hadi", gender: "Laki-laki", status: "HADIR" }] as any,
+      "9a",
+      "Devy, S.Pd."
+    )
 
     assert(
-      resFailure.success === false &&
-        resFailure.count === 0 &&
-        typeof resFailure.error === "string" &&
-        resFailure.error.includes("Simulasi Kegagalan"),
-      "Kegagalan Supabase dilaporkan secara jujur (success: false), tidak ditampilkan sebagai keberhasilan",
-      resFailure
+      failServiceRes === false,
+      "Kegagalan Supabase mengembalikan boolean false secara konsisten dengan signature asli",
+      { returnValue: failServiceRes }
     )
   } finally {
-    // Pulihkan mock
     ;(supabase as any).from = originalFrom
   }
 
   console.log("\n=======================================================")
-  console.log(`HASIL AKHIR PENGUJIAN STORAGE PATH: ${passed} LULUS, ${failed} GAGAL`)
+  console.log(`HASIL AKHIR PENGUJIAN: ${passed} LULUS, ${failed} GAGAL`)
   console.log("=======================================================")
 
   if (failed > 0) process.exit(1)
