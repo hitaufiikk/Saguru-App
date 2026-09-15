@@ -369,3 +369,94 @@ export function parseSpreadsheetData(data: ArrayBuffer | Uint8Array | string): P
     }
   }
 }
+
+export interface StudentValidationFailure {
+  rowNumber?: number
+  noAbs: number
+  nisn: string
+  nama: string
+  reason: string
+}
+
+export interface StudentValidationResult {
+  validStudents: ParsedStudentRow[]
+  rejectedStudents: StudentValidationFailure[]
+  totalValid: number
+  totalRejected: number
+  rejectionReasonsSummary: {
+    emptyIdentity: number
+    duplicateIdentity: number
+  }
+}
+
+/**
+ * Memvalidasi data siswa sebelum disimpan ke database / penyimpanan lokal.
+ * Mencegah penyimpanan siswa dengan identitas kosong, hanya spasi, atau duplikat di dalam batch.
+ * Mempertahankan format teks identitas (termasuk nol di depan).
+ */
+export function validateStudentsForSave(students: ParsedStudentRow[]): StudentValidationResult {
+  const validStudents: ParsedStudentRow[] = []
+  const rejectedStudents: StudentValidationFailure[] = []
+  let emptyIdentityCount = 0
+  let duplicateIdentityCount = 0
+
+  // 1. Hitung frekuensi setiap identitas (trimmed)
+  const identityCounts = new Map<string, number>()
+  for (const s of students) {
+    const trimmedId = (s.nisn || "").trim()
+    if (trimmedId.length > 0) {
+      identityCounts.set(trimmedId, (identityCounts.get(trimmedId) || 0) + 1)
+    }
+  }
+
+  // 2. Evaluasi setiap siswa
+  for (let idx = 0; idx < students.length; idx++) {
+    const s = students[idx]
+    const trimmedId = (s.nisn || "").trim()
+
+    // Cek 1: Identitas kosong atau hanya spasi
+    if (trimmedId.length === 0) {
+      emptyIdentityCount++
+      rejectedStudents.push({
+        rowNumber: idx + 1,
+        noAbs: s.noAbs,
+        nisn: s.nisn,
+        nama: s.nama,
+        reason: "Identitas (NIS/NISN) kosong atau hanya spasi",
+      })
+      continue
+    }
+
+    // Cek 2: Identitas duplikat di dalam batch
+    const count = identityCounts.get(trimmedId) || 0
+    if (count > 1) {
+      duplicateIdentityCount++
+      rejectedStudents.push({
+        rowNumber: idx + 1,
+        noAbs: s.noAbs,
+        nisn: s.nisn,
+        nama: s.nama,
+        reason: `Identitas duplikat ('${trimmedId}') ditemukan pada lebih dari satu siswa`,
+      })
+      continue
+    }
+
+    // Lolos: pertahankan teks asli (termasuk nol di depan)
+    validStudents.push({
+      ...s,
+      nisn: trimmedId,
+    })
+  }
+
+  return {
+    validStudents,
+    rejectedStudents,
+    totalValid: validStudents.length,
+    totalRejected: rejectedStudents.length,
+    rejectionReasonsSummary: {
+      emptyIdentity: emptyIdentityCount,
+      duplicateIdentity: duplicateIdentityCount,
+    },
+  }
+}
+

@@ -2,7 +2,13 @@
 
 import { useState, useRef, useMemo } from "react"
 import Link from "next/link"
-import { parseSpreadsheetData, ParsedStudentRow, SkippedRowInfo } from "@/lib/import-utils"
+import {
+  parseSpreadsheetData,
+  ParsedStudentRow,
+  SkippedRowInfo,
+  validateStudentsForSave,
+} from "@/lib/import-utils"
+import { studentService } from "@/lib/services/studentService"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -74,11 +80,16 @@ export function MigrasiDataForm() {
   // Empty initial state until file upload
   const [fileName, setFileName] = useState<string>("")
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false)
+  const [isSaving, setIsSaving] = useState<boolean>(false)
   const [showPreview, setShowPreview] = useState<boolean>(true)
   const [parsedData, setParsedData] = useState<ParsedStudentRow[]>([])
   const [totalRows, setTotalRows] = useState<number>(0)
   const [skippedRows, setSkippedRows] = useState<SkippedRowInfo[]>([])
   const [showSkippedDetails, setShowSkippedDetails] = useState<boolean>(false)
+  const [showValidationDetails, setShowValidationDetails] = useState<boolean>(false)
+
+  // Evaluasi validitas identitas sebelum penyimpanan
+  const validationResult = useMemo(() => validateStudentsForSave(parsedData), [parsedData])
 
   // Success Modal Dialog State
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false)
@@ -87,6 +98,7 @@ export function MigrasiDataForm() {
     wali: string
     kelas: string
     total: number
+    rejectedCount: number
     skippedCount: number
     tahun: string
   } | null>(null)
@@ -102,6 +114,7 @@ export function MigrasiDataForm() {
       setIsLoadingFile(true)
       setSkippedRows([])
       setShowSkippedDetails(false)
+      setShowValidationDetails(false)
 
       try {
         if (file.name.toLowerCase().endsWith(".pdf")) {
@@ -238,7 +251,7 @@ export function MigrasiDataForm() {
     }
   }
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!fileName || parsedData.length === 0) {
       alert("Silakan unggah berkas .pdf atau .xlsx yang memiliki data siswa terlebih dahulu!")
@@ -248,37 +261,71 @@ export function MigrasiDataForm() {
     const classCode = pilihKelas.toLowerCase()
     const targetClassName = pilihKelas.toUpperCase()
 
-    try {
-      const existing = localStorage.getItem("saguru_migrated_students")
-      const existingMap = existing ? JSON.parse(existing) : {}
-      existingMap[classCode] = parsedData
-      localStorage.setItem("saguru_migrated_students", JSON.stringify(existingMap))
-      window.dispatchEvent(new Event("saguru-data-updated"))
-    } catch (err) {
-      console.error("Gagal menyimpan data migrasi:", err)
+    // 1. Validasi identitas sebelum simpan
+    const validation = validateStudentsForSave(parsedData)
+    if (validation.validStudents.length === 0) {
+      alert(
+        "Tidak ada siswa dengan identitas valid yang dapat disimpan. " +
+          `Ditemukan ${validation.rejectionReasonsSummary.emptyIdentity} siswa tanpa identitas dan ` +
+          `${validation.rejectionReasonsSummary.duplicateIdentity} siswa dengan identitas duplikat.`
+      )
+      return
     }
 
-    const currentTahunOption = tahunSemesterOptions.find((opt: { value: string; label: string }) => opt.value === tahunSemester)
-    const selectedTahunLabel = currentTahunOption ? currentTahunOption.label : "2026/2027 - Semester Genap"
+    setIsSaving(true)
+    try {
+      // 2. Simpan ke database Supabase via service produksi
+      const saveResult = await studentService.saveMigratedStudents(
+        validation.validStudents as any,
+        classCode,
+        waliKelas
+      )
 
-    setSubmittedInfo({
-      fileName,
-      wali: waliKelas,
-      kelas: targetClassName,
-      total: totalRows,
-      skippedCount: skippedRows.length,
-      tahun: selectedTahunLabel,
-    })
-    setIsSuccessModalOpen(true)
+      if (!saveResult.success) {
+        alert(`Penyimpanan ke database gagal: ${saveResult.error || "Terjadi kendala pada service."}`)
+        return
+      }
 
-    // Reset form & preview state after successful upload
-    setFileName("")
-    setParsedData([])
-    setTotalRows(0)
-    setSkippedRows([])
-    setShowSkippedDetails(false)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ""
+      // 3. Simpan ke localStorage HANYA data siswa yang valid
+      try {
+        const existing = localStorage.getItem("saguru_migrated_students")
+        const existingMap = existing ? JSON.parse(existing) : {}
+        existingMap[classCode] = validation.validStudents
+        localStorage.setItem("saguru_migrated_students", JSON.stringify(existingMap))
+        window.dispatchEvent(new Event("saguru-data-updated"))
+      } catch (err) {
+        console.error("Gagal menyimpan data migrasi lokal:", err)
+      }
+
+      const currentTahunOption = tahunSemesterOptions.find((opt: { value: string; label: string }) => opt.value === tahunSemester)
+      const selectedTahunLabel = currentTahunOption ? currentTahunOption.label : "2026/2027 - Semester Genap"
+
+      setSubmittedInfo({
+        fileName,
+        wali: waliKelas,
+        kelas: targetClassName,
+        total: saveResult.count,
+        rejectedCount: validation.totalRejected,
+        skippedCount: skippedRows.length,
+        tahun: selectedTahunLabel,
+      })
+      setIsSuccessModalOpen(true)
+
+      // Reset form & preview state after successful upload
+      setFileName("")
+      setParsedData([])
+      setTotalRows(0)
+      setSkippedRows([])
+      setShowSkippedDetails(false)
+      setShowValidationDetails(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    } catch (err: any) {
+      console.error("Error during submit:", err)
+      alert("Terjadi kesalahan saat memproses penyimpanan data.")
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -409,10 +456,21 @@ export function MigrasiDataForm() {
           <div className="pt-2">
             <Button
               type="submit"
-              disabled={isLoadingFile || !fileName || parsedData.length === 0}
+              disabled={
+                isLoadingFile ||
+                isSaving ||
+                !fileName ||
+                parsedData.length === 0 ||
+                validationResult.validStudents.length === 0
+              }
               className="w-full bg-[#4274D9] hover:bg-[#3561bd] disabled:opacity-50 text-white text-xs h-9 gap-2 cursor-pointer font-semibold shadow-sm"
             >
-              {isLoadingFile ? (
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Menyimpan ke Database...</span>
+                </>
+              ) : isLoadingFile ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>Memproses Berkas...</span>
@@ -472,7 +530,35 @@ export function MigrasiDataForm() {
                 </Badge>
               </div>
 
-              {/* Skipped Rows Alert Banner (jika ada baris yang dilewati) */}
+              {/* Validation Alert Banner (Jika ada identitas kosong atau duplikat) */}
+              {validationResult.totalRejected > 0 && (
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-800 dark:text-rose-300 text-xs flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+                      Perhatian: {validationResult.totalRejected} siswa memiliki identitas kosong atau duplikat (tidak akan disimpan)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowValidationDetails(!showValidationDetails)}
+                      className="text-[11px] underline text-rose-700 dark:text-rose-200 hover:opacity-80 cursor-pointer font-normal"
+                    >
+                      {showValidationDetails ? "Sembunyikan Rincian" : "Lihat Rincian Penolakan"}
+                    </button>
+                  </div>
+                  {showValidationDetails && (
+                    <div className="max-h-28 overflow-y-auto mt-1 border-t border-rose-500/20 pt-1.5 space-y-1">
+                      {validationResult.rejectedStudents.map((rf, idx) => (
+                        <div key={idx} className="text-[11px] font-mono text-rose-900 dark:text-rose-200">
+                          • Baris {rf.rowNumber || idx + 1} ({rf.nama || "Tanpa Nama"}): {rf.reason}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Skipped Rows Alert Banner (jika ada baris yang dilewati saat parsing) */}
               {skippedRows.length > 0 && (
                 <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex flex-col gap-1.5">
                   <div className="flex items-center justify-between font-semibold">
@@ -514,38 +600,50 @@ export function MigrasiDataForm() {
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">Status</Table.Column>
                         </Table.Header>
                         <Table.Body>
-                          {parsedData.slice(0, 5).map((row) => (
-                            <Table.Row key={`${row.nisn}-${row.noAbs}`} className="border-border">
-                              <Table.Cell className="text-xs font-medium text-foreground p-2.5">{row.noAbs}</Table.Cell>
-                              <Table.Cell className="text-xs font-mono text-muted-foreground p-2.5">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span>{row.nisn || "-"}</span>
-                                  {row.identityType === "NISN" && (
-                                    <Badge variant="outline" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 text-[9px] px-1 py-0 font-semibold">
-                                      NISN
-                                    </Badge>
-                                  )}
-                                  {row.identityType === "NIS" && (
-                                    <Badge variant="outline" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[9px] px-1 py-0 font-semibold">
-                                      No. Induk
-                                    </Badge>
-                                  )}
-                                  {row.identityType === "TIDAK_ADA" && (
-                                    <Badge variant="outline" className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 text-[9px] px-1 py-0 font-semibold">
-                                      Tanpa ID
-                                    </Badge>
-                                  )}
-                                </div>
-                              </Table.Cell>
-                              <Table.Cell className="text-xs font-semibold text-foreground p-2.5">{row.nama}</Table.Cell>
-                              <Table.Cell className="text-xs text-foreground p-2.5">{row.gender}</Table.Cell>
-                              <Table.Cell className="text-xs p-2.5">
-                                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px] font-semibold">
-                                  {row.status}
-                                </Badge>
-                              </Table.Cell>
-                            </Table.Row>
-                          ))}
+                          {parsedData.slice(0, 5).map((row) => {
+                            const isDuplicate = validationResult.rejectedStudents.some(
+                              (r) => r.noAbs === row.noAbs && r.reason.includes("duplikat")
+                            )
+                            const isEmptyId = !row.nisn || row.nisn.trim() === ""
+
+                            return (
+                              <Table.Row key={`${row.nisn}-${row.noAbs}`} className="border-border">
+                                <Table.Cell className="text-xs font-medium text-foreground p-2.5">{row.noAbs}</Table.Cell>
+                                <Table.Cell className="text-xs font-mono text-muted-foreground p-2.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span>{row.nisn || "-"}</span>
+                                    {isEmptyId && (
+                                      <Badge variant="outline" className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 text-[9px] px-1 py-0 font-semibold">
+                                        Tanpa ID
+                                      </Badge>
+                                    )}
+                                    {isDuplicate && (
+                                      <Badge variant="outline" className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 text-[9px] px-1 py-0 font-semibold">
+                                        ID Duplikat
+                                      </Badge>
+                                    )}
+                                    {!isEmptyId && !isDuplicate && row.identityType === "NISN" && (
+                                      <Badge variant="outline" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 text-[9px] px-1 py-0 font-semibold">
+                                        NISN
+                                      </Badge>
+                                    )}
+                                    {!isEmptyId && !isDuplicate && row.identityType === "NIS" && (
+                                      <Badge variant="outline" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[9px] px-1 py-0 font-semibold">
+                                        No. Induk
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </Table.Cell>
+                                <Table.Cell className="text-xs font-semibold text-foreground p-2.5">{row.nama}</Table.Cell>
+                                <Table.Cell className="text-xs text-foreground p-2.5">{row.gender}</Table.Cell>
+                                <Table.Cell className="text-xs p-2.5">
+                                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px] font-semibold">
+                                    {row.status}
+                                  </Badge>
+                                </Table.Cell>
+                              </Table.Row>
+                            )
+                          })}
                         </Table.Body>
                       </Table.Content>
                     </Table.ScrollContainer>
@@ -588,7 +686,8 @@ export function MigrasiDataForm() {
             {fileName && parsedData.length > 0 ? (
               <span>
                 Menampilkan {Math.min(5, parsedData.length)} dari {totalRows} baris siswa terdeteksi dari berkas <strong>{fileName}</strong>
-                {skippedRows.length > 0 ? ` (${skippedRows.length} baris dilewati)` : ""}.
+                {validationResult.totalRejected > 0 ? ` (${validationResult.totalRejected} identitas tidak valid/duplikat)` : ""}
+                {skippedRows.length > 0 ? ` (${skippedRows.length} baris dilewati saat parsing)` : ""}.
               </span>
             ) : (
               <span>Unggah berkas untuk mengekstrak dan memvalidasi kolom NISN/NIS, Nama, serta Jenis Kelamin.</span>
@@ -608,7 +707,7 @@ export function MigrasiDataForm() {
               Migrasi Data Siswa Berhasil!
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground text-center">
-              Data berkas telah berhasil diimpor dan disinkronkan ke dalam database sistem SAGURU.
+              Data berkas telah berhasil divalidasi dan disimpan ke dalam database sistem SAGURU.
             </DialogDescription>
           </DialogHeader>
 
@@ -632,17 +731,26 @@ export function MigrasiDataForm() {
                 </Badge>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Total Siswa Terimpor:</span>
+                <span className="text-muted-foreground">Total Siswa Berhasil Disimpan:</span>
                 <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                   <UserCheck className="h-3.5 w-3.5" />
                   {submittedInfo.total} Siswa
                 </span>
               </div>
-              {submittedInfo.skippedCount > 0 && (
-                <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
-                  <span className="text-muted-foreground">Baris Data Dilewati:</span>
+              {submittedInfo.rejectedCount > 0 && (
+                <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
+                  <span className="text-muted-foreground">Ditolak (Identitas Kosong/Duplikat):</span>
                   <span className="font-semibold flex items-center gap-1">
                     <AlertTriangle className="h-3.5 w-3.5" />
+                    {submittedInfo.rejectedCount} Siswa (Tidak Disimpan)
+                  </span>
+                </div>
+              )}
+              {submittedInfo.skippedCount > 0 && (
+                <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
+                  <span className="text-muted-foreground">Baris Dilewati Saat Parsing:</span>
+                  <span className="font-semibold flex items-center gap-1">
+                    <Info className="h-3.5 w-3.5" />
                     {submittedInfo.skippedCount} Baris (Diberitahukan)
                   </span>
                 </div>

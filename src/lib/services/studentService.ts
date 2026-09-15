@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase"
+import { validateStudentsForSave } from "@/lib/import-utils"
 
 export interface StudentRecord {
   id?: string
@@ -70,9 +71,27 @@ export const studentService = {
   },
 
   // Batch insert/upsert migrated students from Excel/PDF
-  async saveMigratedStudents(students: StudentRecord[], kelasCode: string, waliKelas: string): Promise<boolean> {
+  async saveMigratedStudents(
+    students: StudentRecord[],
+    kelasCode: string,
+    waliKelas: string
+  ): Promise<{ success: boolean; count: number; error?: string }> {
     try {
-      const formatted = students.map((s) => ({
+      // 1. Validasi identitas sebelum data dikirim ke Supabase
+      // Baris dengan identitas kosong, spasi, atau duplikat disaring
+      const validation = validateStudentsForSave(students as any)
+      if (validation.validStudents.length === 0) {
+        console.warn("saveMigratedStudents: Tidak ada siswa dengan identitas valid untuk disimpan.")
+        return {
+          success: false,
+          count: 0,
+          error: "Tidak ada siswa dengan identitas valid untuk disimpan (identitas kosong atau duplikat).",
+        }
+      }
+
+      // 2. Format payload: HANYA kolom resmi tabel Supabase 'students'
+      // Properti 'nis' dan 'identityType' TIDAK disertakan dalam payload Supabase
+      const formatted = validation.validStudents.map((s) => ({
         nisn: s.nisn,
         nama: s.nama,
         gender: s.gender,
@@ -86,12 +105,16 @@ export const studentService = {
 
       if (error) {
         console.error("Supabase batch upsert error:", error.message)
-        return false
+        return { success: false, count: 0, error: error.message }
       }
-      return true
-    } catch (err) {
+      return { success: true, count: formatted.length }
+    } catch (err: any) {
       console.error("Error in saveMigratedStudents:", err)
-      return false
+      return {
+        success: false,
+        count: 0,
+        error: err?.message || "Terjadi kesalahan saat menyimpan data migrasi.",
+      }
     }
   },
 
