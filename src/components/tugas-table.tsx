@@ -703,7 +703,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               )}
               <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
               <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
-              <Table.Column className="text-foreground font-semibold">Nama</Table.Column>
+              <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
               <Table.Column className="text-foreground font-semibold">L/P</Table.Column>
 
               {/* Dynamic Task Header Columns */}

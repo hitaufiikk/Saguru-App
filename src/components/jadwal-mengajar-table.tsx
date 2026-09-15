@@ -176,7 +176,7 @@ export function JadwalMengajarTable() {
               <HeroTable.Column className="text-foreground font-semibold">Jam Ke</HeroTable.Column>
               <HeroTable.Column className="text-foreground font-semibold">Waktu</HeroTable.Column>
               <HeroTable.Column className="text-foreground font-semibold">Kelas</HeroTable.Column>
-              <HeroTable.Column className="text-foreground font-semibold">Mata Pelajaran</HeroTable.Column>
+              <HeroTable.Column isRowHeader className="text-foreground font-semibold">Mata Pelajaran</HeroTable.Column>
               <HeroTable.Column className="text-foreground font-semibold">Kategori</HeroTable.Column>
               <HeroTable.Column className="text-foreground font-semibold">Lokasi / Ruangan</HeroTable.Column>
               <HeroTable.Column className="text-foreground font-semibold text-center">Aksi Presensi</HeroTable.Column>

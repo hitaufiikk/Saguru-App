@@ -116,11 +116,13 @@ export function WelcomeBanner() {
   const [isMinimized, setIsMinimized] = useState(false)
   const [timeStr, setTimeStr] = useState("")
 
-  const [stats, setStats] = useState(() => ({
-    presensi: getPresensiStats(),
-    pendingTasks: getPendingTasksCount(),
+  // Inisialisasi state awal yang konsisten antara SSR server dan client untuk mencegah hydration mismatch.
+  // Data dari localStorage akan dimuat secara aman di dalam useEffect setelah hidrasi selesai.
+  const [stats, setStats] = useState({
+    presensi: { total: 0, hadir: 0, percentage: 100 },
+    pendingTasks: { totalTasks: 0, pendingCount: 0 },
     schedule: getTodayScheduleSummary(),
-  }))
+  })
 
   const refreshStats = () => {
     setStats({

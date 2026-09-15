@@ -577,7 +577,7 @@ export function MigrasiDataForm() {
                         <Table.Header>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">No</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">Identitas (NISN / NIS)</Table.Column>
-                          <Table.Column className="text-foreground font-bold text-xs p-2.5">Nama Lengkap Siswa</Table.Column>
+                          <Table.Column isRowHeader className="text-foreground font-bold text-xs p-2.5">Nama Lengkap Siswa</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">L/P</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">Status</Table.Column>
                         </Table.Header>

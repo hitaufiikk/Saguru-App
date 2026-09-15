@@ -3,16 +3,24 @@
 import * as React from "react";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 
+// Mencegah pesan peringatan false-positive React 19 tentang tag <script> yang diinjeksikan oleh next-themes
+if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    if (
+      typeof args[0] === "string" &&
+      args[0].includes("Encountered a script tag while rendering React component")
+    ) {
+      return;
+    }
+    originalError.apply(console, args);
+  };
+}
+
 export function ThemeProvider({
   children,
   ...props
 }: React.ComponentProps<typeof NextThemesProvider>) {
-  const [mounted, setMounted] = React.useState(false);
-
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
-
   return (
     <NextThemesProvider
       attribute="class"
@@ -21,7 +29,7 @@ export function ThemeProvider({
       disableTransitionOnChange
       {...props}
     >
-      {mounted ? children : <div style={{ visibility: "hidden" }}>{children}</div>}
+      {children}
     </NextThemesProvider>
   );
 }
