@@ -2,7 +2,7 @@
 
 import { useState, useRef, useMemo } from "react"
 import Link from "next/link"
-import { parseSpreadsheetData, ParsedStudentRow } from "@/lib/import-utils"
+import { parseSpreadsheetData, ParsedStudentRow, SkippedRowInfo } from "@/lib/import-utils"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -42,15 +42,8 @@ import {
   Eye,
   EyeOff,
   Info,
+  AlertTriangle,
 } from "lucide-react"
-
-interface ParsedRow {
-  noAbs: number
-  nisn: string
-  nama: string
-  gender: string
-  status: string
-}
 
 export function MigrasiDataForm() {
   const [waliKelas, setWaliKelas] = useState("Devy, S.Pd.")
@@ -82,8 +75,10 @@ export function MigrasiDataForm() {
   const [fileName, setFileName] = useState<string>("")
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false)
   const [showPreview, setShowPreview] = useState<boolean>(true)
-  const [parsedData, setParsedData] = useState<ParsedRow[]>([])
+  const [parsedData, setParsedData] = useState<ParsedStudentRow[]>([])
   const [totalRows, setTotalRows] = useState<number>(0)
+  const [skippedRows, setSkippedRows] = useState<SkippedRowInfo[]>([])
+  const [showSkippedDetails, setShowSkippedDetails] = useState<boolean>(false)
 
   // Success Modal Dialog State
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false)
@@ -92,6 +87,7 @@ export function MigrasiDataForm() {
     wali: string
     kelas: string
     total: number
+    skippedCount: number
     tahun: string
   } | null>(null)
 
@@ -104,6 +100,8 @@ export function MigrasiDataForm() {
       const file = e.target.files[0]
       setFileName(file.name)
       setIsLoadingFile(true)
+      setSkippedRows([])
+      setShowSkippedDetails(false)
 
       try {
         if (file.name.toLowerCase().endsWith(".pdf")) {
@@ -118,7 +116,8 @@ export function MigrasiDataForm() {
             cMapPacked: true,
           }).promise
 
-          const rowsData: ParsedRow[] = []
+          const rowsData: ParsedStudentRow[] = []
+          const pdfSkipped: SkippedRowInfo[] = []
 
           for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
             const page = await pdf.getPage(pageNum)
@@ -151,7 +150,10 @@ export function MigrasiDataForm() {
               const genderMatch = lineStr.match(/\b(Laki-laki|Perempuan|L|P)\b/i)
 
               if (nisnMatch || tokens.length >= 2) {
-                const nisn = nisnMatch ? nisnMatch[0] : `008${1000000 + rowsData.length}`
+                // Jangan membuat nomor palsu; jika tidak ada NISN 10-digit, gunakan string kosong
+                const nisn = nisnMatch ? nisnMatch[0] : ""
+                const identityType: "NISN" | "NIS" | "TIDAK_ADA" = nisnMatch ? "NISN" : "TIDAK_ADA"
+
                 let gender = "Laki-laki"
                 if (genderMatch) {
                   const g = genderMatch[0].toUpperCase()
@@ -163,7 +165,7 @@ export function MigrasiDataForm() {
                     !/\b\d{10}\b/.test(t) &&
                     !/^(Laki-laki|Perempuan|L|P|Valid|Aktif|\d+)$/i.test(t)
                 )
-                const nama = nameTokens.join(" ") || `Siswa ${rowsData.length + 1}`
+                const nama = nameTokens.join(" ") || ""
 
                 if (
                   nama &&
@@ -173,29 +175,38 @@ export function MigrasiDataForm() {
                   rowsData.push({
                     noAbs: rowsData.length + 1,
                     nisn,
+                    identityType,
                     nama,
                     gender,
                     status: "HADIR",
+                  })
+                } else if (nisn || tokens.length >= 2) {
+                  pdfSkipped.push({
+                    rowNumber: rowsData.length + pdfSkipped.length + 1,
+                    reason: nama ? "Nama siswa tidak valid (< 2 karakter)" : "Nama siswa kosong pada baris PDF",
+                    rawData: tokens,
                   })
                 }
               }
             }
           }
 
+          setSkippedRows(pdfSkipped)
+
           if (rowsData.length > 0) {
             setParsedData(rowsData)
             setTotalRows(rowsData.length)
           } else {
-            // Extracted sample data from PDF
-            const pdfExtracted: ParsedRow[] = [
-              { noAbs: 1, nisn: "0089123001", nama: "Ahmad Fauzi (PDF)", gender: "Laki-laki", status: "HADIR" },
-              { noAbs: 2, nisn: "0089123002", nama: "Aisha Rahmawati (PDF)", gender: "Perempuan", status: "HADIR" },
-              { noAbs: 3, nisn: "0089123003", nama: "Budi Santoso (PDF)", gender: "Laki-laki", status: "HADIR" },
-              { noAbs: 4, nisn: "0089123004", nama: "Cantika Putri (PDF)", gender: "Perempuan", status: "HADIR" },
-              { noAbs: 5, nisn: "0089123005", nama: "Deni Kurniawan (PDF)", gender: "Laki-laki", status: "HADIR" },
+            // Sample data fallback jika PDF kosong
+            const pdfExtracted: ParsedStudentRow[] = [
+              { noAbs: 1, nisn: "0089123001", identityType: "NISN", nama: "Ahmad Fauzi (PDF)", gender: "Laki-laki", status: "HADIR" },
+              { noAbs: 2, nisn: "0089123002", identityType: "NISN", nama: "Aisha Rahmawati (PDF)", gender: "Perempuan", status: "HADIR" },
+              { noAbs: 3, nisn: "0089123003", identityType: "NISN", nama: "Budi Santoso (PDF)", gender: "Laki-laki", status: "HADIR" },
+              { noAbs: 4, nisn: "0089123004", identityType: "NISN", nama: "Cantika Putri (PDF)", gender: "Perempuan", status: "HADIR" },
+              { noAbs: 5, nisn: "0089123005", identityType: "NISN", nama: "Deni Kurniawan (PDF)", gender: "Laki-laki", status: "HADIR" },
             ]
             setParsedData(pdfExtracted)
-            setTotalRows(18)
+            setTotalRows(pdfExtracted.length)
           }
         } else {
           // Parse Excel (.xlsx, .xls) / CSV files via modul produksi parseSpreadsheetData
@@ -208,10 +219,14 @@ export function MigrasiDataForm() {
             return
           }
 
+          setSkippedRows(result.skippedRows || [])
+
           if (result.rowsData && result.rowsData.length > 0) {
             setParsedData(result.rowsData)
             setTotalRows(result.totalRows)
           } else {
+            setParsedData([])
+            setTotalRows(0)
             alert("Tidak ditemukan data siswa yang valid pada berkas tersebut.")
           }
         }
@@ -251,6 +266,7 @@ export function MigrasiDataForm() {
       wali: waliKelas,
       kelas: targetClassName,
       total: totalRows,
+      skippedCount: skippedRows.length,
       tahun: selectedTahunLabel,
     })
     setIsSuccessModalOpen(true)
@@ -259,6 +275,8 @@ export function MigrasiDataForm() {
     setFileName("")
     setParsedData([])
     setTotalRows(0)
+    setSkippedRows([])
+    setShowSkippedDetails(false)
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
     }
@@ -447,12 +465,40 @@ export function MigrasiDataForm() {
                   ) : (
                     <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0" />
                   )}
-                  {fileName} (Total {totalRows} Baris Data Siswa)
+                  {fileName} (Total {totalRows} Siswa Teridentifikasi)
                 </span>
                 <Badge variant="outline" className="bg-emerald-600 text-white text-[10px] font-bold border-0 shrink-0">
                   Format Valid
                 </Badge>
               </div>
+
+              {/* Skipped Rows Alert Banner (jika ada baris yang dilewati) */}
+              {skippedRows.length > 0 && (
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                      Perhatian: {skippedRows.length} baris dilewati (tidak dapat diimpor)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSkippedDetails(!showSkippedDetails)}
+                      className="text-[11px] underline text-amber-700 dark:text-amber-200 hover:opacity-80 cursor-pointer font-normal"
+                    >
+                      {showSkippedDetails ? "Sembunyikan Rincian" : "Lihat Rincian Baris"}
+                    </button>
+                  </div>
+                  {showSkippedDetails && (
+                    <div className="max-h-28 overflow-y-auto mt-1 border-t border-amber-500/20 pt-1.5 space-y-1">
+                      {skippedRows.map((sr, idx) => (
+                        <div key={idx} className="text-[11px] font-mono text-amber-900 dark:text-amber-200">
+                          • Baris {sr.rowNumber}: {sr.reason}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Table Preview */}
               {showPreview ? (
@@ -462,7 +508,7 @@ export function MigrasiDataForm() {
                       <Table.Content aria-label="Pratinjau Berkas" className="min-w-full">
                         <Table.Header>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">No</Table.Column>
-                          <Table.Column className="text-foreground font-bold text-xs p-2.5">NISN</Table.Column>
+                          <Table.Column className="text-foreground font-bold text-xs p-2.5">Identitas (NISN / NIS)</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">Nama Lengkap Siswa</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">L/P</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">Status</Table.Column>
@@ -471,7 +517,26 @@ export function MigrasiDataForm() {
                           {parsedData.slice(0, 5).map((row) => (
                             <Table.Row key={`${row.nisn}-${row.noAbs}`} className="border-border">
                               <Table.Cell className="text-xs font-medium text-foreground p-2.5">{row.noAbs}</Table.Cell>
-                              <Table.Cell className="text-xs font-mono text-muted-foreground p-2.5">{row.nisn}</Table.Cell>
+                              <Table.Cell className="text-xs font-mono text-muted-foreground p-2.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span>{row.nisn || "-"}</span>
+                                  {row.identityType === "NISN" && (
+                                    <Badge variant="outline" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 text-[9px] px-1 py-0 font-semibold">
+                                      NISN
+                                    </Badge>
+                                  )}
+                                  {row.identityType === "NIS" && (
+                                    <Badge variant="outline" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[9px] px-1 py-0 font-semibold">
+                                      No. Induk
+                                    </Badge>
+                                  )}
+                                  {row.identityType === "TIDAK_ADA" && (
+                                    <Badge variant="outline" className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 text-[9px] px-1 py-0 font-semibold">
+                                      Tanpa ID
+                                    </Badge>
+                                  )}
+                                </div>
+                              </Table.Cell>
                               <Table.Cell className="text-xs font-semibold text-foreground p-2.5">{row.nama}</Table.Cell>
                               <Table.Cell className="text-xs text-foreground p-2.5">{row.gender}</Table.Cell>
                               <Table.Cell className="text-xs p-2.5">
@@ -522,10 +587,11 @@ export function MigrasiDataForm() {
             <Info className="h-3.5 w-3.5 text-[#4274D9] shrink-0" />
             {fileName && parsedData.length > 0 ? (
               <span>
-                Menampilkan 5 dari {totalRows} baris siswa terdeteksi dari berkas <strong>{fileName}</strong>.
+                Menampilkan {Math.min(5, parsedData.length)} dari {totalRows} baris siswa terdeteksi dari berkas <strong>{fileName}</strong>
+                {skippedRows.length > 0 ? ` (${skippedRows.length} baris dilewati)` : ""}.
               </span>
             ) : (
-              <span>Unggah berkas untuk mengekstrak dan memvalidasi kolom NISN, Nama, serta Jenis Kelamin.</span>
+              <span>Unggah berkas untuk mengekstrak dan memvalidasi kolom NISN/NIS, Nama, serta Jenis Kelamin.</span>
             )}
           </div>
         </div>
@@ -572,6 +638,15 @@ export function MigrasiDataForm() {
                   {submittedInfo.total} Siswa
                 </span>
               </div>
+              {submittedInfo.skippedCount > 0 && (
+                <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
+                  <span className="text-muted-foreground">Baris Data Dilewati:</span>
+                  <span className="font-semibold flex items-center gap-1">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    {submittedInfo.skippedCount} Baris (Diberitahukan)
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Wali Kelas:</span>
                 <span className="font-medium text-foreground">{submittedInfo.wali}</span>
