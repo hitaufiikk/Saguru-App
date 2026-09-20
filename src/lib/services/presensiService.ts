@@ -1,3 +1,4 @@
+import { schoolDate } from "@/lib/school-date"
 import { supabase } from "@/lib/supabase"
 
 export interface PresensiRecord {
@@ -11,32 +12,16 @@ export interface PresensiRecord {
 
 export const presensiService = {
   // Fetch presensi for a class on a specific date (defaults to today)
-  async getPresensiByClass(kelasCode: string, tanggal?: string): Promise<Record<string, { status: string; alasanDispen: string }>> {
-    try {
-      const targetDate = tanggal || new Date().toISOString().split("T")[0]
-
-      const { data, error } = await supabase
-        .from("presensi")
-        .select("nisn, status, alasan_dispen")
-        .eq("kelas_code", kelasCode.toLowerCase())
-        .eq("tanggal_presensi", targetDate)
-
-      if (error) {
-        console.warn("Supabase fetch presensi warning:", error.message)
-        return {}
-      }
-
-      const map: Record<string, { status: string; alasanDispen: string }> = {}
-      ;(data || []).forEach((row) => {
-        map[row.nisn] = {
-          status: row.status || "HADIR",
-          alasanDispen: row.alasan_dispen || "",
-        }
-      })
-      return map
-    } catch (err) {
-      return {}
+  async getPresensiByClass(kelasCode: string, tanggal = schoolDate(), client = supabase): Promise<Record<string, { status: string; alasanDispen: string }>> {
+    const { data, error } = await client.from("presensi")
+      .select("nisn, status, alasan_dispen")
+      .eq("kelas_code", kelasCode.toLowerCase()).eq("tanggal_presensi", tanggal)
+    if (error) throw error
+    const map: Record<string, { status: string; alasanDispen: string }> = {}
+    for (const row of data || []) map[row.nisn] = {
+      status: row.status || "BELUM_DICATAT", alasanDispen: row.alasan_dispen || "",
     }
+    return map
   },
 
   // Save/Upsert attendance status for a student
@@ -46,29 +31,18 @@ export const presensiService = {
     status: string,
     alasanDispen?: string,
     tanggal?: string,
-    namaSiswa?: string
+    client = supabase
   ): Promise<boolean> {
     try {
-      const targetDate = tanggal || new Date().toISOString().split("T")[0]
+      const targetDate = tanggal || schoolDate()
 
-      // 1. Ensure student exists in `students` table to satisfy Foreign Key Constraint
-      try {
-        await supabase.from("students").upsert(
-          [
-            {
-              nisn,
-              nama: namaSiswa || `Siswa ${nisn}`,
-              gender: "Laki-laki",
-              kelas_code: kelasCode.toLowerCase(),
-              wali_kelas: kelasCode.toLowerCase() === "9a" ? "Devy, S.Pd." : "-",
-            },
-          ],
-          { onConflict: "nisn" }
-        )
-      } catch (e) {}
+      // Attendance must never create or overwrite the master student record.
+      const { data: student, error: studentError } = await client.from("students")
+        .select("nisn").eq("nisn", nisn).eq("kelas_code", kelasCode.toLowerCase()).maybeSingle()
+      if (studentError || !student) return false
 
       // 2. Upsert presensi record
-      const { error } = await supabase.from("presensi").upsert(
+      const { error } = await client.from("presensi").upsert(
         [
           {
             nisn,
@@ -85,9 +59,9 @@ export const presensiService = {
       if (error) {
         console.warn("Supabase presensi warning:", error.message)
       }
-      return true
-    } catch (err) {
-      return true
+      return !error
+    } catch {
+      return false
     }
   },
 
@@ -130,7 +104,8 @@ export const presensiService = {
   async getMonthlyPresensiByClass(
     kelasCode: string,
     year: number,
-    month: number
+    month: number,
+    client = supabase
   ): Promise<Record<string, Record<number, { status: string; alasanDispen: string }>>> {
     try {
       const mm = String(month).padStart(2, "0")
@@ -138,7 +113,7 @@ export const presensiService = {
       const startDate = `${year}-${mm}-01`
       const endDate = `${year}-${mm}-${String(daysInMonth).padStart(2, "0")}`
 
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from("presensi")
         .select("nisn, tanggal_presensi, status, alasan_dispen")
         .eq("kelas_code", kelasCode.toLowerCase())
@@ -158,14 +133,14 @@ export const presensiService = {
             monthlyMap[row.nisn] = {}
           }
           monthlyMap[row.nisn][dayNum] = {
-            status: row.status || "HADIR",
+            status: row.status ? row.status : "BELUM_DICATAT",
             alasanDispen: row.alasan_dispen || "",
           }
         }
       })
 
       return monthlyMap
-    } catch (err) {
+    } catch {
       return {}
     }
   },

@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Table } from "@heroui/react";
-import { Edit3, Trash2, Search, UserPlus, Download, FileText, FileSpreadsheet } from "lucide-react";
+import { Edit3, Search, UserPlus, Download, FileText, FileSpreadsheet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
+
 import {
   Dialog,
   DialogClose,
@@ -44,11 +44,20 @@ import {
 import {
   exportToExcel,
   exportToPDF,
+  exportMonthlyPresensiToExcel,
+  exportMonthlyPresensiToPDF,
+  buildStudentMonthlyAttendance,
   getFormattedCurrentDate,
   getFormattedCurrentDateTime,
 } from "@/lib/export-utils"
 import { studentService } from "@/lib/services/studentService"
+import { schoolDate } from "@/lib/school-date"
 import { presensiService } from "@/lib/services/presensiService"
+
+const NAMA_BULAN_INDONESIA = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+]
 
 export interface StudentItem {
   noAbs: number
@@ -128,112 +137,108 @@ const getValidAttendanceStatus = (status?: string): string => {
   if (status && VALID_ATTENDANCE_STATUSES.includes(status)) {
     return status
   }
-  return "HADIR"
+  return "BELUM_DICATAT"
 }
 
 export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
-  const [students, setStudents] = useState<StudentItem[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem("saguru_migrated_students")
-        const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
-        const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
-        const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
+  const [students, setStudents] = useState<StudentItem[]>([])
 
-        if (stored) {
-          const map = JSON.parse(stored)
-          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
-            const classStudents: StudentItem[] = map[kelasCode?.toLowerCase()]
-            return classStudents
-              .filter((s) => !hiddenNisns.includes(s.nisn))
-              .map((s) => ({ ...s, status: getValidAttendanceStatus(s.status) }))
-          }
-        }
-      } catch (err) {
-        console.error("Error reading localStorage:", err)
-      }
-    }
-    return []
-  })
+  const [selectedDate, setSelectedDate] = useState("")
+  const [loadedKey, setLoadedKey] = useState("")
+  const [loadError, setLoadError] = useState("")
+  const [reload, setReload] = useState(0)
+  const [savingNisn, setSavingNisn] = useState<string | null>(null)
+  const savingRef = useRef(false)
+  const requestVersion = useRef(0)
+  const dataKey = `${kelasCode.toLowerCase()}:${selectedDate}`
+  const ready = Boolean(selectedDate && loadedKey === dataKey && !loadError)
+  const exportTanggal = selectedDate
 
-  // Fetch from Supabase + localStorage on mount and when kelasCode changes
+  // Bulan dan Tahun Presensi
+  const [selectedBulan, setSelectedBulan] = useState<number>(8)
+  const [selectedTahun, setSelectedTahun] = useState<number>(2026)
+
+  // Sinkronkan selectedBulan dan selectedTahun setiap kali selectedDate berubah
   useEffect(() => {
-    let isMounted = true
-
-    const loadData = async () => {
-      try {
-        const [dbStudents, dbPresensi] = await Promise.all([
-          studentService.getStudentsByClass(kelasCode),
-          presensiService.getPresensiByClass(kelasCode),
-        ])
-
-        if (isMounted && dbStudents && dbStudents.length > 0) {
-          const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
-          const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
-          const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
-
-          const formatted: StudentItem[] = dbStudents
-            .filter((s) => !hiddenNisns.includes(s.nisn))
-            .map((s, index) => {
-              const pInfo = dbPresensi[s.nisn]
-              return {
-                noAbs: s.noAbs || index + 1,
-                nisn: s.nisn,
-                nama: s.nama,
-                gender: s.gender || "Laki-laki",
-                status: getValidAttendanceStatus(pInfo?.status || s.status),
-                alasanDispen: pInfo?.alasanDispen || "",
-              }
-            })
-
-          setStudents(formatted)
-
-          try {
-            const stored = localStorage.getItem("saguru_migrated_students")
-            const map = stored ? JSON.parse(stored) : {}
-            map[kelasCode.toLowerCase()] = formatted
-            localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
-          } catch (e) {}
-          return
+    if (selectedDate) {
+      const parts = selectedDate.split("-")
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10)
+        const m = parseInt(parts[1], 10)
+        if (!isNaN(y) && !isNaN(m)) {
+          setSelectedTahun(y)
+          setSelectedBulan(m)
         }
-      } catch (err) {
-        console.warn("Supabase presensi load fallback:", err)
       }
+    }
+  }, [selectedDate])
 
-      // Fallback to local storage
+  const handleBulanChange = (newMonthStr: string | null) => {
+    if (!newMonthStr) return
+    const newMonth = parseInt(newMonthStr, 10)
+    setSelectedBulan(newMonth)
+    const y = selectedTahun || 2026
+    const daysInNewMonth = new Date(y, newMonth, 0).getDate()
+    const currentDay = selectedDate ? parseInt(selectedDate.split("-")[2], 10) : 1
+    const safeDay = Math.min(isNaN(currentDay) || currentDay < 1 ? 1 : currentDay, daysInNewMonth)
+    const newDateStr = `${y}-${String(newMonth).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`
+    setSelectedDate(newDateStr)
+    setLoadedKey("")
+    setLoadError("")
+    setCurrentPage(1)
+    setDispenStudent(null)
+  }
+
+  const handleTahunChange = (newYearStr: string | null) => {
+    if (!newYearStr) return
+    const newYear = parseInt(newYearStr, 10)
+    setSelectedTahun(newYear)
+    const m = selectedBulan || 1
+    const daysInNewMonth = new Date(newYear, m, 0).getDate()
+    const currentDay = selectedDate ? parseInt(selectedDate.split("-")[2], 10) : 1
+    const safeDay = Math.min(isNaN(currentDay) || currentDay < 1 ? 1 : currentDay, daysInNewMonth)
+    const newDateStr = `${newYear}-${String(m).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`
+    setSelectedDate(newDateStr)
+    setLoadedKey("")
+    setLoadError("")
+    setCurrentPage(1)
+    setDispenStudent(null)
+  }
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const version = ++requestVersion.current
+      if (!selectedDate) {
+        await Promise.resolve()
+        if (active) setSelectedDate(schoolDate())
+        return
+      }
       try {
-        const stored = localStorage.getItem("saguru_migrated_students")
-        const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
-        const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
-        const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
-
-        if (stored) {
-          const map = JSON.parse(stored)
-          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
-            const classStudents: StudentItem[] = map[kelasCode?.toLowerCase()]
-            if (isMounted) {
-              setStudents(
-                classStudents
-                  .filter((s) => !hiddenNisns.includes(s.nisn))
-                  .map((s) => ({ ...s, status: getValidAttendanceStatus(s.status) }))
-              )
-            }
-          }
-        }
-      } catch (err) {}
+        const [dbStudents, attendance] = await Promise.all([
+          studentService.getStudentsByClass(kelasCode),
+          presensiService.getPresensiByClass(kelasCode, selectedDate),
+        ])
+        if (!active || version !== requestVersion.current) return
+        setStudents(dbStudents.map((student, index) => ({
+          noAbs: student.noAbs || index + 1, nisn: student.nisn,
+          nama: student.nama, gender: student.gender || "Laki-laki",
+          status: getValidAttendanceStatus(attendance[student.nisn]?.status),
+          alasanDispen: attendance[student.nisn]?.alasanDispen || "",
+        })))
+        setLoadedKey(`${kelasCode.toLowerCase()}:${selectedDate}`)
+        setLoadError("")
+      } catch {
+        if (!active || version !== requestVersion.current) return
+        setLoadedKey("")
+        setLoadError("Presensi gagal dimuat. Periksa koneksi lalu tekan Coba lagi. Data belum dapat diedit atau diekspor.")
+      }
     }
-
-    loadData()
-
-    const handleUpdate = () => {
-      loadData()
-    }
-    window.addEventListener("saguru-data-updated", handleUpdate)
-    return () => {
-      isMounted = false
-      window.removeEventListener("saguru-data-updated", handleUpdate)
-    }
-  }, [kelasCode])
+    void load()
+    const refresh = () => { if (!savingRef.current) void load() }
+    window.addEventListener("saguru-data-updated", refresh)
+    return () => { active = false; requestVersion.current++; window.removeEventListener("saguru-data-updated", refresh) }
+  }, [kelasCode, selectedDate, reload])
 
   const [searchQuery, setSearchQuery] = useState("")
 
@@ -253,86 +258,11 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const [editNisn, setEditNisn] = useState("")
   const [editGender, setEditGender] = useState("cowok")
 
-  // State Dialog Hapus Siswa
-  const [deletingStudent, setDeletingStudent] = useState<StudentItem | null>(null)
-
-  // Persistent Multi-select Key
-  const storageKey = `saguru_selected_presensi_${kelasCode.toLowerCase()}`
-
-  // Multi-select & Bulk Delete State
-  const [isSelectionMode, setIsSelectionMode] = useState(false)
-  const [selectedNisns, setSelectedNisns] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem(storageKey)
-        if (stored) return JSON.parse(stored)
-      } catch (err) {}
-    }
-    return []
-  })
-  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
-
-  // Load selection when kelasCode changes
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(storageKey)
-      if (stored) {
-        setSelectedNisns(JSON.parse(stored))
-      } else {
-        setSelectedNisns([])
-      }
-    } catch (err) {
-      setSelectedNisns([])
-    }
-  }, [kelasCode, storageKey])
-
-  const saveSelectedNisns = (newSelected: string[]) => {
-    setSelectedNisns(newSelected)
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(newSelected))
-    } catch (err) {}
-  }
-
   const filteredStudents = students.filter(
     (student) =>
       student.nama.toLowerCase().includes(searchQuery.toLowerCase()) ||
       student.nisn.includes(searchQuery)
   )
-
-  const isAllSelected = filteredStudents.length > 0 && filteredStudents.every((s) => selectedNisns.includes(s.nisn))
-
-  const handleToggleHeaderCheckbox = () => {
-    if (isAllSelected) {
-      saveSelectedNisns([])
-    } else {
-      saveSelectedNisns(filteredStudents.map((s) => s.nisn))
-    }
-  }
-
-  const handleToggleSelect = (nisn: string) => {
-    const next = selectedNisns.includes(nisn)
-      ? selectedNisns.filter((id) => id !== nisn)
-      : [...selectedNisns, nisn]
-    saveSelectedNisns(next)
-  }
-
-  const handleExecuteBulkDelete = () => {
-    const updated = students.filter((s) => !selectedNisns.includes(s.nisn))
-    setStudents(updated)
-    try {
-      const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
-      const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
-      const existingHidden: string[] = deletedMap[kelasCode.toLowerCase()] || []
-      const newHidden = Array.from(new Set([...existingHidden, ...selectedNisns]))
-      deletedMap[kelasCode.toLowerCase()] = newHidden
-      localStorage.setItem("saguru_presensi_deleted_nisns", JSON.stringify(deletedMap))
-
-      localStorage.removeItem(storageKey)
-    } catch (err) {}
-    saveSelectedNisns([])
-    setIsBulkDeleteOpen(false)
-    setIsSelectionMode(false)
-  }
 
   // State Dialog Form Dispensasi Siswa
   const [dispenStudent, setDispenStudent] = useState<StudentItem | null>(null)
@@ -352,73 +282,58 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
       const todayDate = getFormattedCurrentDate()
       localStorage.setItem(`saguru_presensi_date_${kelasCode.toLowerCase()}`, todayDate)
-      setExportTanggal(todayDate)
+
 
       window.dispatchEvent(new Event("saguru-data-updated"))
-    } catch (err) {}
+    } catch (err) { }
   }
 
-  const handleSaveDispen = (e: React.FormEvent<HTMLFormElement>) => {
+  const saveAttendance = async (nisn: string, status: string, reason = "") => {
+    if (savingRef.current || !ready) return false
+    savingRef.current = true
+    setSavingNisn(nisn)
+    requestVersion.current++
+    try {
+      const ok = await presensiService.updateAttendance(nisn, kelasCode, status, reason, selectedDate)
+      if (!ok) { alert("Presensi gagal disimpan. Isian tetap tersedia; silakan coba lagi."); return false }
+      setStudents(previous => previous.map(student => student.nisn === nisn
+        ? { ...student, status, alasanDispen: status === "DISPEN" ? reason : "" } : student))
+      return true
+    } finally {
+      savingRef.current = false
+      setSavingNisn(null)
+      window.dispatchEvent(new Event("saguru-data-updated"))
+    }
+  }
+
+  const handleSaveDispen = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!dispenStudent) return
-
-    const reason = dispenAlasan.trim()
-    const targetStudent = dispenStudent
-    const updated = students.map((s) =>
-      s.nisn === targetStudent.nisn
-        ? {
-            ...s,
-            status: "DISPEN",
-            alasanDispen: reason,
-          }
-        : s
-    )
-    setStudents(updated)
-    syncToLocalStorage(updated)
-
-    // Async sync to Supabase
-    presensiService
-      .updateAttendance(targetStudent.nisn, kelasCode, "DISPEN", reason, undefined, targetStudent.nama)
-      .catch((err) => console.warn("Supabase updateAttendance error:", err))
-
-    setDispenStudent(null)
-    setDispenAlasan("")
+    if (await saveAttendance(dispenStudent.nisn, "DISPEN", dispenAlasan.trim())) {
+      setDispenStudent(null)
+      setDispenAlasan("")
+    }
   }
 
-  const handleSetStatus = (nisn: string, newStatus: string) => {
-    const student = students.find((s) => s.nisn === nisn)
-    const updated = students.map((s) =>
-      s.nisn === nisn
-        ? {
-            ...s,
-            status: newStatus,
-            alasanDispen: "",
-          }
-        : s
-    )
-    setStudents(updated)
-    syncToLocalStorage(updated)
-
-    // Async sync to Supabase
-    presensiService
-      .updateAttendance(nisn, kelasCode, newStatus, "", undefined, student?.nama)
-      .catch((err) => console.warn("Supabase updateAttendance error:", err))
-  }
+  const handleSetStatus = (nisn: string, newStatus: string) => saveAttendance(nisn, newStatus)
 
   // State Dialog Export Data
   const [isExportOpen, setIsExportOpen] = useState(false)
+  const [exportType, setExportType] = useState<"bulanan" | "harian">("bulanan")
   const [exportFormat, setExportFormat] = useState<"pdf" | "excel">("pdf")
+  const [exportBulan, setExportBulan] = useState<number>(8)
+  const [exportTahunAngka, setExportTahunAngka] = useState<number>(2026)
   const [exportWaliKelas, setExportWaliKelas] = useState("Devy, S.Pd.")
   const [exportKelas, setExportKelas] = useState(`Kelas ${kelasCode.toUpperCase()}`)
   const [exportTahun, setExportTahun] = useState("2026/2027")
-  const [exportTanggal, setExportTanggal] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      const storedDate = localStorage.getItem(`saguru_presensi_date_${kelasCode.toLowerCase()}`)
-      if (storedDate) return storedDate
-    }
-    return getFormattedCurrentDate()
-  })
+  const [exportLoading, setExportLoading] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  const handleOpenExport = () => {
+    setExportBulan(selectedBulan)
+    setExportTahunAngka(selectedTahun)
+    setIsExportOpen(true)
+  }
 
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / itemsPerPage))
   const safeCurrentPage = Math.min(currentPage, totalPages)
@@ -461,11 +376,11 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     const updated = students.map((s) =>
       s.nisn === editingStudent.nisn
         ? {
-            ...s,
-            nisn: editNisn.trim(),
-            nama: editNama.trim(),
-            gender: editGender === "cowok" ? "Laki-laki" : "Perempuan",
-          }
+          ...s,
+          nisn: editNisn.trim(),
+          nama: editNama.trim(),
+          gender: editGender === "cowok" ? "Laki-laki" : "Perempuan",
+        }
         : s
     )
     setStudents(updated)
@@ -473,60 +388,141 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     setEditingStudent(null)
   }
 
-  const handleConfirmDelete = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!deletingStudent) return
-
-    const updated = students.filter((s) => s.nisn !== deletingStudent.nisn)
-    setStudents(updated)
-    syncToLocalStorage(updated)
-    setDeletingStudent(null)
-  }
-
   const handleExportSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (savingRef.current) return
     const formatLabel = exportFormat === "pdf" ? "PDF" : "Excel (.xlsx)"
-    setToastMessage(`Mengunduh file ${formatLabel} untuk ${exportKelas}...`)
-
-    const currentExportTime = getFormattedCurrentDateTime()
+    setExportLoading(true)
 
     try {
-      if (exportFormat === "excel") {
-        await exportToExcel({
-          students,
+      if (exportType === "bulanan") {
+        const bulanName = NAMA_BULAN_INDONESIA[exportBulan - 1]
+        setToastMessage(`Mengunduh Rekap Presensi Bulan ${bulanName} ${exportTahunAngka} (${formatLabel})...`)
+
+        // 1. Ambil data presensi bulan tersebut dari Supabase
+        const monthlyData = await presensiService.getMonthlyPresensiByClass(kelasCode, exportTahunAngka, exportBulan)
+
+        // 2. Ambil data siswa terkini (prioritaskan state students, fallback ke service)
+        let currentStudents = students
+        if (currentStudents.length === 0) {
+          const dbStudents = await studentService.getStudentsByClass(kelasCode)
+          currentStudents = dbStudents.map((s, idx) => ({
+            noAbs: s.noAbs || idx + 1,
+            nisn: s.nisn,
+            nama: s.nama,
+            gender: s.gender || "Laki-laki",
+          }))
+        }
+
+        const daysInMonth = new Date(exportTahunAngka, exportBulan, 0).getDate()
+        const monthlyStudents = buildStudentMonthlyAttendance(currentStudents, monthlyData, daysInMonth)
+
+        const exportOptions = {
+          students: monthlyStudents,
           kelas: exportKelas,
-          tahun: exportTahun,
+          bulan: exportBulan,
+          tahun: exportTahunAngka,
           waliKelas: exportWaliKelas,
-          tanggal: exportTanggal,
-          tanggalExport: currentExportTime,
-        })
+          tahunAjaran: exportTahun,
+        }
+
+        if (exportFormat === "excel") {
+          await exportMonthlyPresensiToExcel(exportOptions)
+        } else {
+          exportMonthlyPresensiToPDF(exportOptions)
+        }
       } else {
-        exportToPDF({
-          students,
-          kelas: exportKelas,
-          tahun: exportTahun,
-          waliKelas: exportWaliKelas,
-          tanggal: exportTanggal,
-          tanggalExport: currentExportTime,
-        })
+        setToastMessage(`Mengunduh file ${formatLabel} untuk ${exportKelas}...`)
+        const currentExportTime = getFormattedCurrentDateTime()
+        if (exportFormat === "excel") {
+          await exportToExcel({
+            students,
+            kelas: exportKelas,
+            tahun: exportTahun,
+            waliKelas: exportWaliKelas,
+            tanggal: exportTanggal,
+            tanggalExport: currentExportTime,
+          })
+        } else {
+          exportToPDF({
+            students,
+            kelas: exportKelas,
+            tahun: exportTahun,
+            waliKelas: exportWaliKelas,
+            tanggal: exportTanggal,
+            tanggalExport: currentExportTime,
+          })
+        }
       }
     } catch (err) {
       console.error("Export error:", err)
+      setToastMessage("Gagal mengunduh berkas presensi.")
+    } finally {
+      setExportLoading(false)
+      setIsExportOpen(false)
+      setTimeout(() => {
+        setToastMessage(null)
+      }, 4000)
     }
-
-    setIsExportOpen(false)
-
-    setTimeout(() => {
-      setToastMessage(null)
-    }, 4000)
   }
 
   return (
     <div className="space-y-4">
+      {/* Kontrol Pilihan Bulan, Tahun, dan Tanggal Presensi */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <label htmlFor="presensi-bulan" className="text-xs font-semibold text-foreground">Bulan:</label>
+          <Select value={String(selectedBulan)} onValueChange={handleBulanChange} disabled={Boolean(savingNisn)}>
+            <SelectTrigger id="presensi-bulan" className="h-9 w-32 text-xs">
+              <SelectValue placeholder="Bulan" />
+            </SelectTrigger>
+            <SelectContent>
+              {NAMA_BULAN_INDONESIA.map((name, idx) => (
+                <SelectItem key={idx + 1} value={String(idx + 1)}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label htmlFor="presensi-tahun" className="text-xs font-semibold text-foreground">Tahun:</label>
+          <Select value={String(selectedTahun)} onValueChange={handleTahunChange} disabled={Boolean(savingNisn)}>
+            <SelectTrigger id="presensi-tahun" className="h-9 w-24 text-xs">
+              <SelectValue placeholder="Tahun" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="2024">2024</SelectItem>
+              <SelectItem value="2025">2025</SelectItem>
+              <SelectItem value="2026">2026</SelectItem>
+              <SelectItem value="2027">2027</SelectItem>
+              <SelectItem value="2028">2028</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label htmlFor="presensi-date" className="text-xs font-semibold text-foreground">Tanggal presensi:</label>
+          <Input id="presensi-date" type="date" className="w-auto h-9 text-xs" value={selectedDate}
+            disabled={Boolean(savingNisn)} onChange={event => {
+              if (!event.target.value || savingRef.current) return
+              requestVersion.current++
+              setSelectedDate(event.target.value); setLoadedKey(""); setLoadError(""); setCurrentPage(1)
+              setDispenStudent(null)
+            }} />
+        </div>
+
+        {savingNisn && <span role="status" className="text-xs text-muted-foreground animate-pulse">Menyimpan presensi...</span>}
+      </div>
+      {loadError && <div role="alert" className="text-sm text-destructive">{loadError} <Button variant="outline" onClick={() => setReload(value => value + 1)}>Coba lagi</Button></div>}
+      {!ready && !loadError && <p role="status">Memuat presensi tanggal terpilih...</p>}
+      {ready && <p className="text-sm text-muted-foreground">{students.filter(s => s.status === "BELUM_DICATAT").length} siswa belum dicatat. Pilih status untuk menyimpan presensi.</p>}
+
       {/* Fitur Search & Export Data */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Kiri: Search Input */}
-        <div className="relative w-72 sm:w-80">
+        <div className="relative w-full sm:max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             type="search"
@@ -536,54 +532,17 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               setSearchQuery(e.target.value)
               setCurrentPage(1)
             }}
-            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border"
+            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border w-full"
           />
         </div>
 
-        {/* Kanan: Tombol Hapus Data & Export */}
-        <div className="flex items-center gap-2">
-          {!isSelectionMode ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 px-3 text-xs sm:text-sm gap-1.5 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer font-medium"
-              onClick={() => setIsSelectionMode(true)}
-              disabled={students.length === 0}
-            >
-              <Trash2 className="h-4 w-4" />
-              <span>Hapus Data</span>
-            </Button>
-          ) : (
-            <div className="flex items-center gap-1.5 animate-in fade-in">
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={selectedNisns.length === 0}
-                className="h-9 px-3 text-xs sm:text-sm gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer font-medium"
-                onClick={() => setIsBulkDeleteOpen(true)}
-              >
-                <Trash2 className="h-4 w-4" />
-                <span>Hapus ({selectedNisns.length})</span>
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 px-3 text-xs sm:text-sm cursor-pointer border-border hover:bg-accent text-muted-foreground"
-                onClick={() => {
-                  setIsSelectionMode(false)
-                  saveSelectedNisns([])
-                }}
-              >
-                Batal
-              </Button>
-            </div>
-          )}
-
+        {/* Export */}
+        <div className="flex items-center gap-2 justify-end">
           <Button
             variant="outline"
             className="h-9 px-3 text-xs sm:text-sm gap-2 cursor-pointer border-border hover:bg-accent"
-            onClick={() => setIsExportOpen(true)}
+            disabled={!ready || Boolean(savingNisn)}
+            onClick={handleOpenExport}
           >
             <Download className="h-4 w-4" />
             <span>Export</span>
@@ -595,18 +554,7 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         <Table.ScrollContainer>
           <Table.Content aria-label={`Data Presensi Siswa Kelas ${kelasCode.toUpperCase()}`} className="min-w-[760px]">
             <Table.Header>
-              {isSelectionMode && (
-                <Table.Column className="w-10 text-center animate-in fade-in">
-                  <div className="flex items-center justify-center">
-                    <Checkbox
-                      checked={isAllSelected}
-                      onCheckedChange={handleToggleHeaderCheckbox}
-                      aria-label="Pilih Semua Siswa Presensi"
-                      className="cursor-pointer"
-                    />
-                  </div>
-                </Table.Column>
-              )}
+
               <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
               <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
               <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
@@ -614,10 +562,10 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               <Table.Column className="text-foreground font-semibold text-center">Status Presensi</Table.Column>
             </Table.Header>
             <Table.Body>
-              {paginatedStudents.length === 0 ? (
+              {!ready || paginatedStudents.length === 0 ? (
                 <Table.Row>
-                  <Table.Cell colSpan={isSelectionMode ? 6 : 5} className="text-center py-6 text-muted-foreground">
-                    Tidak ada data siswa yang cocok dengan pencarian &quot;{searchQuery}&quot;
+                  <Table.Cell colSpan={5} className="text-center py-6 text-muted-foreground">
+                    {!ready ? "Data presensi belum tersedia." : searchQuery ? `Tidak ada siswa yang cocok dengan pencarian "${searchQuery}".` : "Belum ada siswa di kelas ini."}
                   </Table.Cell>
                 </Table.Row>
               ) : (
@@ -625,18 +573,7 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                   const currentStatus = getValidAttendanceStatus(student.status)
                   return (
                     <Table.Row key={student.nisn}>
-                      {isSelectionMode && (
-                        <Table.Cell className="text-center animate-in fade-in">
-                          <div className="flex items-center justify-center">
-                            <Checkbox
-                              checked={selectedNisns.includes(student.nisn)}
-                              onCheckedChange={() => handleToggleSelect(student.nisn)}
-                              aria-label={`Pilih ${student.nama}`}
-                              className="cursor-pointer"
-                            />
-                          </div>
-                        </Table.Cell>
-                      )}
+
                       <Table.Cell>{student.noAbs}</Table.Cell>
                       <Table.Cell className="font-mono">{student.nisn}</Table.Cell>
                       <Table.Cell>
@@ -649,7 +586,8 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                       </Table.Cell>
                       <Table.Cell>{student.gender}</Table.Cell>
                       <Table.Cell>
-                        <div className="flex items-center justify-center gap-1.5">
+                        {currentStatus === "BELUM_DICATAT" && <p className="text-xs text-center mb-2 text-muted-foreground">Belum dicatat</p>}
+                        <fieldset disabled={!ready || Boolean(savingNisn)} className="flex items-center justify-center gap-1.5" aria-label={`Status presensi ${student.nama}`}>
                           {/* HADIR = Hijau */}
                           <button
                             type="button"
@@ -705,7 +643,7 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                           >
                             ALPHA
                           </button>
-                        </div>
+                        </fieldset>
                       </Table.Cell>
                     </Table.Row>
                   )
@@ -769,17 +707,51 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base font-semibold">
                 <Download className="h-5 w-5 text-[#4274D9]" />
-                <span>Export Data Siswa</span>
+                <span>Export Rekap Presensi Siswa</span>
               </DialogTitle>
               <DialogDescription className="text-xs">
-                Pilih format dokumen dan atur metadata sebelum mengunduh data siswa.
+                Pilih format dokumen, periode bulan/tahun, dan atur metadata sebelum mengunduh rekap.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-1">
+              {/* Pilihan Mode Dokumen (Bulanan Landscape vs Harian) */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Jenis Rekap Presensi</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex flex-col items-start p-2.5 rounded-lg border text-left cursor-pointer transition-all",
+                      exportType === "bulanan"
+                        ? "border-[#4274D9] bg-[#4274D9]/10 text-foreground font-medium"
+                        : "border-border hover:bg-accent/50 text-muted-foreground"
+                    )}
+                    onClick={() => setExportType("bulanan")}
+                  >
+                    <span className="text-xs font-semibold">Rekap 1 Bulan</span>
+                    <span className="text-[10px] text-muted-foreground">1 lembar landscape A4</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex flex-col items-start p-2.5 rounded-lg border text-left cursor-pointer transition-all",
+                      exportType === "harian"
+                        ? "border-[#4274D9] bg-[#4274D9]/10 text-foreground font-medium"
+                        : "border-border hover:bg-accent/50 text-muted-foreground"
+                    )}
+                    onClick={() => setExportType("harian")}
+                  >
+                    <span className="text-xs font-semibold">Presensi Harian</span>
+                    <span className="text-[10px] text-muted-foreground">Tanggal terpilih ({exportTanggal})</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Tahap 1: Opsi Format Export */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Format Dokumen</Label>
+                <Label className="text-xs font-semibold">Format Berkas</Label>
                 <RadioGroup value={exportFormat} onValueChange={(val) => setExportFormat(val as "pdf" | "excel")} className="grid grid-cols-2 gap-3 mt-1">
                   <div
                     className={cn(
@@ -820,20 +792,56 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
               {/* Tahap 2: Pengaturan Metadata Dokumen */}
               <FieldGroup className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                {exportType === "bulanan" ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field>
+                      <Label className="text-xs font-semibold">Pilihan Bulan</Label>
+                      <Select value={String(exportBulan)} onValueChange={(val) => val && setExportBulan(parseInt(val, 10))}>
+                        <SelectTrigger className="w-full h-9 text-xs">
+                          <SelectValue placeholder="Pilih Bulan" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {NAMA_BULAN_INDONESIA.map((name, idx) => (
+                            <SelectItem key={idx + 1} value={String(idx + 1)}>
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+
+                    <Field>
+                      <Label className="text-xs font-semibold">Pilihan Tahun</Label>
+                      <Select value={String(exportTahunAngka)} onValueChange={(val) => val && setExportTahunAngka(parseInt(val, 10))}>
+                        <SelectTrigger className="w-full h-9 text-xs">
+                          <SelectValue placeholder="Pilih Tahun" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="2024">2024</SelectItem>
+                          <SelectItem value="2025">2025</SelectItem>
+                          <SelectItem value="2026">2026</SelectItem>
+                          <SelectItem value="2027">2027</SelectItem>
+                          <SelectItem value="2028">2028</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                ) : (
                   <Field>
                     <Label htmlFor="export-heroui-tanggal" className="text-xs font-semibold">Tanggal Presensi</Label>
                     <Input
                       id="export-heroui-tanggal"
                       name="tanggal"
                       value={exportTanggal}
-                      onChange={(e) => setExportTanggal(e.target.value)}
+                      readOnly
                       placeholder="13 Agustus 2026"
-                      className="h-9 text-xs"
+                      className="h-9 text-xs bg-muted"
                       required
                     />
                   </Field>
+                )}
 
+                <div className="grid grid-cols-2 gap-3">
                   <Field>
                     <Label htmlFor="export-heroui-wali-kelas" className="text-xs font-semibold">Wali Kelas</Label>
                     <Input
@@ -846,9 +854,7 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                       required
                     />
                   </Field>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3">
                   <Field>
                     <Label className="text-xs font-semibold">Kelas Binaan</Label>
                     <Select value={exportKelas} onValueChange={(val) => val && setExportKelas(val)}>
@@ -863,102 +869,97 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                       </SelectContent>
                     </Select>
                   </Field>
-
-                  <Field>
-                    <Label className="text-xs font-semibold">Tahun Ajaran</Label>
-                    <Select value={exportTahun} onValueChange={(val) => val && setExportTahun(val)}>
-                      <SelectTrigger className="w-full h-9 text-xs">
-                        <SelectValue placeholder="Pilih Tahun" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="2026/2027">2026/2027</SelectItem>
-                        <SelectItem value="2027/2028">2027/2028</SelectItem>
-                        <SelectItem value="2028/2029">2028/2029</SelectItem>
-                        <SelectItem value="2029/2030">2029/2030</SelectItem>
-                        <SelectItem value="2030/2031">2030/2031</SelectItem>
-                        <SelectItem value="2031/2032">2031/2032</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
                 </div>
+
+                <Field>
+                  <Label className="text-xs font-semibold">Tahun Ajaran</Label>
+                  <Select value={exportTahun} onValueChange={(val) => val && setExportTahun(val)}>
+                    <SelectTrigger className="w-full h-9 text-xs">
+                      <SelectValue placeholder="Pilih Tahun" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="2025/2026">2025/2026</SelectItem>
+                      <SelectItem value="2026/2027">2026/2027</SelectItem>
+                      <SelectItem value="2027/2028">2027/2028</SelectItem>
+                      <SelectItem value="2028/2029">2028/2029</SelectItem>
+                      <SelectItem value="2029/2030">2029/2030</SelectItem>
+                      <SelectItem value="2030/2031">2030/2031</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
               </FieldGroup>
 
-              {/* Tahap 3: Area Preview Ringkas (Format Presensi Sesuai Layout Template) */}
+              {/* Tahap 3: Area Preview Ringkas */}
               <div className="rounded-lg border border-border/80 bg-muted/60 p-3.5 text-xs space-y-2">
                 <div className="flex items-center justify-between border-b border-border/50 pb-2">
-                  <span className="font-semibold text-foreground">Draft Dokumen Presensi</span>
+                  <span className="font-semibold text-foreground">
+                    {exportType === "bulanan" ? "Format Rekap Bulanan" : "Format Presensi Harian"}
+                  </span>
                   <span className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary font-mono font-bold uppercase">
-                    {exportFormat === "pdf" ? "PDF Document" : "Excel (.xlsx)"}
+                    {exportFormat === "pdf" ? "PDF (Landscape)" : "Excel (.xlsx)"}
                   </span>
                 </div>
 
-                <div className="bg-background/90 rounded border border-border/60 p-3 font-mono text-[11px] space-y-1.5 shadow-2xs">
-                  <div className="text-center font-bold text-foreground tracking-wide">
-                    DAFTAR PRESENSI SISWA
-                  </div>
-                  <div className="text-center font-bold text-foreground">
-                    TAHUN PELAJARAN {exportTahun}
-                  </div>
-                  <div className="flex justify-between items-end pt-2 text-[10px] text-muted-foreground border-t border-border/40 font-sans">
-                    <div>
-                      <div>TANGGAL: {exportTanggal}</div>
-                      <div className="italic">MATA PELAJARAN: Presensi Harian</div>
+                {exportType === "bulanan" ? (
+                  <div className="bg-background/90 rounded border border-border/60 p-3 font-sans text-xs space-y-2 shadow-2xs">
+                    <div className="text-center font-bold text-foreground tracking-wide font-mono">
+                      REKAPITULASI PRESENSI BULANAN SISWA
                     </div>
-                    <div className="text-right font-medium text-foreground leading-tight">
-                      <div>KELAS : {exportKelas}</div>
-                      <div>Wali Kelas : {exportWaliKelas || "-"}</div>
+                    <div className="text-center text-[11px] text-muted-foreground">
+                      BULAN: <strong className="text-foreground">{NAMA_BULAN_INDONESIA[exportBulan - 1].toUpperCase()} {exportTahunAngka}</strong> | {exportTahun}
                     </div>
-                  </div>
-
-                  <div className="pt-2 font-sans">
-                    <div className="grid grid-cols-12 gap-1 bg-muted p-1 text-[9px] font-bold border text-center text-foreground">
-                      <div className="col-span-1">NO</div>
-                      <div className="col-span-2">NISN</div>
-                      <div className="col-span-4 text-left pl-1">NAMA</div>
-                      <div className="col-span-1">L/P</div>
-                      <div className="col-span-2">STATUS</div>
-                      <div className="col-span-2 text-left pl-1">KET</div>
-                    </div>
-                    <div className="divide-y border-x border-b text-[9px]">
-                      {students.slice(0, 3).map((s) => (
-                        <div key={s.nisn} className="grid grid-cols-12 gap-1 p-1 text-center items-center">
-                          <div className="col-span-1 font-mono">{s.noAbs}</div>
-                          <div className="col-span-2 font-mono text-muted-foreground truncate">{s.nisn}</div>
-                          <div className="col-span-4 text-left truncate pl-1 font-medium">{s.nama.toUpperCase()}</div>
-                          <div className="col-span-1">{s.gender === "Laki-laki" ? "L" : "P"}</div>
-                          <div className="col-span-2 font-bold">{s.status || "HADIR"}</div>
-                          <div className="col-span-2 text-left truncate pl-1 text-[8px] text-muted-foreground">
-                            {s.status === "DISPEN" ? (s.alasanDispen || "Dispen") : "-"}
-                          </div>
-                        </div>
-                      ))}
-                      {students.length > 3 && (
-                        <div className="p-1 text-center text-muted-foreground italic text-[9px]">
-                          ... dan {students.length - 3} siswa lainnya ...
-                        </div>
-                      )}
+                    <div className="p-2 rounded bg-muted/50 border border-border/40 text-[11px] space-y-1 text-muted-foreground">
+                      <div className="flex justify-between">
+                        <span>Tata letak:</span>
+                        <span className="font-medium text-foreground">1 Lembar Landscape A4</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Cakupan tanggal:</span>
+                        <span className="font-medium text-foreground">1 s/d {new Date(exportTahunAngka, exportBulan, 0).getDate()} {NAMA_BULAN_INDONESIA[exportBulan - 1]}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Data belum dicatat:</span>
+                        <span className="font-medium text-foreground">Tetap tertulis &quot;–&quot;</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Ringkasan kehadiran:</span>
+                        <span className="font-medium text-foreground">H, S, I, A, D, dan % Kehadiran</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-
-                <div className="text-[10px] text-muted-foreground space-y-1 pt-1 border-t border-border/40 font-sans">
-                  <div className="flex justify-between items-center">
-                    <span>Rekap Presensi: <strong className="text-foreground">H: {students.filter((s) => (s.status || "HADIR") === "HADIR").length}</strong> | <strong className="text-amber-600">D: {students.filter((s) => s.status === "DISPEN").length}</strong> | <strong className="text-rose-600">S: {students.filter((s) => s.status === "SAKIT").length}</strong> | <strong className="text-sky-600">A: {students.filter((s) => s.status === "ALPHA").length}</strong></span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">✓ Format Presensi</span>
+                ) : (
+                  <div className="bg-background/90 rounded border border-border/60 p-3 font-mono text-[11px] space-y-1.5 shadow-2xs">
+                    <div className="text-center font-bold text-foreground tracking-wide">
+                      DAFTAR PRESENSI SISWA
+                    </div>
+                    <div className="text-center font-bold text-foreground">
+                      TAHUN PELAJARAN {exportTahun}
+                    </div>
+                    <div className="flex justify-between items-end pt-2 text-[10px] text-muted-foreground border-t border-border/40 font-sans">
+                      <div>
+                        <div>TANGGAL: {exportTanggal}</div>
+                        <div className="italic">MATA PELAJARAN: Presensi Harian</div>
+                      </div>
+                      <div className="text-right font-medium text-foreground leading-tight">
+                        <div>KELAS : {exportKelas}</div>
+                        <div>Wali Kelas : {exportWaliKelas || "-"}</div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center text-[10px]">
-                    <span>Gender: L ({students.filter((s) => s.gender === "Laki-laki" || s.gender === "L").length}) | P ({students.filter((s) => s.gender === "Perempuan" || s.gender === "P").length})</span>
-                    <span>Total: <strong className="text-foreground font-semibold">{students.length} Siswa</strong></span>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
 
             <DialogFooter className="mt-2">
               <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs px-3">Batal</Button>} />
-              <Button type="submit" size="sm" className="h-8 text-xs px-3 gap-1.5 bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer">
+              <Button
+                type="submit"
+                size="sm"
+                disabled={exportLoading}
+                className="h-8 text-xs px-3 gap-1.5 bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer"
+              >
                 <Download className="h-3.5 w-3.5" />
-                <span>Unduh Dokumen</span>
+                <span>{exportLoading ? "Mengunduh..." : "Unduh Dokumen"}</span>
               </Button>
             </DialogFooter>
           </form>
@@ -1029,9 +1030,9 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
       </Dialog>
 
       {/* Dialog Form Dispensasi Siswa */}
-      <Dialog open={dispenStudent !== null} onOpenChange={(open) => { if (!open) setDispenStudent(null) }}>
+      <Dialog open={dispenStudent !== null} onOpenChange={(open) => { if (!open && !savingRef.current) setDispenStudent(null) }}>
         <DialogContent className="sm:max-w-md">
-          <form onSubmit={handleSaveDispen} className="space-y-4">
+          <form onSubmit={handleSaveDispen} className="space-y-4"><fieldset disabled={Boolean(savingNisn) || !ready} className="space-y-4">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
                 <span className="h-3 w-3 rounded-full bg-amber-500 inline-block" />
@@ -1064,53 +1065,7 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                 Simpan Dispensasi
               </Button>
             </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog Konfirmasi Hapus Beberapa / Semua Data Presensi */}
-      <Dialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="text-red-600 dark:text-red-400 flex items-center gap-2">
-              <Trash2 className="h-5 w-5" />
-              <span>Konfirmasi Hapus Data Presensi</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
-              Apakah Anda yakin ingin menghapus <strong className="text-foreground font-semibold">{selectedNisns.length} data siswa</strong> dari daftar presensi Kelas {kelasCode.toUpperCase()}? Data yang telah dihapus tidak dapat dikembalikan.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0 pt-2">
-            <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs">Batal</Button>} />
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white font-medium cursor-pointer"
-              onClick={handleExecuteBulkDelete}
-            >
-              Ya, Hapus {selectedNisns.length} Data
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog Hapus Data Siswa */}
-      <Dialog open={deletingStudent !== null} onOpenChange={(open) => { if (!open) setDeletingStudent(null) }}>
-        <DialogContent className="sm:max-w-sm">
-          <form onSubmit={handleConfirmDelete}>
-            <DialogHeader>
-              <DialogTitle>Hapus data siswa</DialogTitle>
-              <DialogDescription>
-                Apakah Anda yakin ingin menghapus data siswa <strong className="text-foreground">{deletingStudent?.nama}</strong>? Tindakan ini tidak dapat dibatalkan.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="mt-4">
-              <DialogClose render={<Button variant="outline" type="button">Batal</Button>} />
-              <Button variant="destructive" type="submit" className="cursor-pointer">
-                OK, Hapus
-              </Button>
-            </DialogFooter>
-          </form>
+          </fieldset></form>
         </DialogContent>
       </Dialog>
 
@@ -1192,29 +1147,6 @@ export default function HeroUITableAnatomy() {
                     </DialogContent>
                   </Dialog>
 
-                  <Dialog>
-                    <DialogTrigger
-                      render={
-                        <button className="p-1.5 rounded-md text-red-600 hover:bg-red-50 transition-colors cursor-pointer" title="Hapus">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      }
-                    />
-                    <DialogContent className="sm:max-w-sm">
-                      <form onSubmit={(e) => e.preventDefault()}>
-                        <DialogHeader>
-                          <DialogTitle>Hapus data siswa</DialogTitle>
-                          <DialogDescription>
-                            Apakah Anda yakin ingin menghapus data siswa ini? Tindakan ini tidak dapat dibatalkan.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <DialogFooter className="mt-4">
-                          <DialogClose render={<Button variant="outline">Batal</Button>} />
-                          <Button variant="destructive" type="submit">OK, Hapus</Button>
-                        </DialogFooter>
-                      </form>
-                    </DialogContent>
-                  </Dialog>
                 </div>
               </Table.Cell>
             </Table.Row>

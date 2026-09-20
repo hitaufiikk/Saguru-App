@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs"
 import jsPDF from "jspdf"
-import autoTable from "jspdf-autotable"
+import autoTable, { type Styles } from "jspdf-autotable"
 
 export interface ExportStudentData {
   noAbs: number
@@ -111,10 +111,10 @@ export async function generateExcelWorkbook(options: ExportOptions): Promise<Exc
   worksheet.mergeCells("E6:E7")
   worksheet.mergeCells("F6:F7")
 
-  ;[r6, r7].forEach((r) => {
-    r.font = { name: "Arial", size: 11, bold: true }
-    r.alignment = { horizontal: "center", vertical: "middle" }
-  })
+    ;[r6, r7].forEach((r) => {
+      r.font = { name: "Arial", size: 11, bold: true }
+      r.alignment = { horizontal: "center", vertical: "middle" }
+    })
 
   const thinBorder: Partial<ExcelJS.Borders> = {
     top: { style: "thin" },
@@ -139,7 +139,7 @@ export async function generateExcelWorkbook(options: ExportOptions): Promise<Exc
 
   // Add Data Rows
   students.forEach((student) => {
-    const statusVal = student.status || "HADIR"
+    const statusVal = student.status || "BELUM_DICATAT"
     const alasanVal = statusVal === "DISPEN" ? (student.alasanDispen || "Dispensasi") : "-"
 
     const row = worksheet.addRow([
@@ -147,7 +147,7 @@ export async function generateExcelWorkbook(options: ExportOptions): Promise<Exc
       student.nisn,
       student.nama.toUpperCase(),
       student.gender === "Laki-laki" || student.gender === "L" ? "L" : "P",
-      statusVal,
+      statusVal === "BELUM_DICATAT" ? "Belum dicatat" : statusVal,
       alasanVal,
     ])
 
@@ -165,7 +165,7 @@ export async function generateExcelWorkbook(options: ExportOptions): Promise<Exc
   // Add Summary Rows
   const countL = students.filter((s) => s.gender === "Laki-laki" || s.gender === "L").length
   const countP = students.filter((s) => s.gender === "Perempuan" || s.gender === "P").length
-  const countHadir = students.filter((s) => (s.status || "HADIR") === "HADIR").length
+  const countHadir = students.filter((s) => (s.status || "BELUM_DICATAT") === "HADIR").length
   const countDispen = students.filter((s) => s.status === "DISPEN").length
   const countSakit = students.filter((s) => s.status === "SAKIT").length
   const countAlpha = students.filter((s) => s.status === "ALPHA").length
@@ -237,7 +237,7 @@ export function generatePDFDoc(options: ExportOptions): jsPDF {
       s.nisn,
       s.nama.toUpperCase(),
       s.gender === "Laki-laki" || s.gender === "L" ? "L" : "P",
-      s.status || "HADIR",
+      !s.status || s.status === "BELUM_DICATAT" ? "Belum dicatat" : s.status,
       s.status === "DISPEN" ? (s.alasanDispen || "Dispensasi") : "-",
     ]),
     theme: "grid",
@@ -273,14 +273,13 @@ export function generatePDFDoc(options: ExportOptions): jsPDF {
   ).length
   const total = students.length
 
-  const countHadir = students.filter((s) => (s.status || "HADIR") === "HADIR").length
+  const countHadir = students.filter((s) => (s.status || "BELUM_DICATAT") === "HADIR").length
   const countDispen = students.filter((s) => s.status === "DISPEN").length
   const countSakit = students.filter((s) => s.status === "SAKIT").length
   const countAlpha = students.filter((s) => s.status === "ALPHA").length
 
-  const finalY = (doc as any).lastAutoTable
-    ? (doc as any).lastAutoTable.finalY + 8
-    : 120
+  const lastTableFinalY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY
+  const finalY = lastTableFinalY ? lastTableFinalY + 8 : 120
 
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9.5)
@@ -329,6 +328,236 @@ export function exportToPDF(options: ExportOptions) {
   }
 }
 
+// =============================================================
+// EXPORT KHUSUS DATA SISWA (EXCEL & PDF)
+// =============================================================
+
+export interface ExportDataSiswaItem {
+  noAbs: number
+  nisn: string
+  nama: string
+  gender: string
+  kontakOrtu?: string
+}
+
+export interface ExportDataSiswaOptions {
+  students: ExportDataSiswaItem[]
+  kelas: string
+  tahun: string
+  waliKelas: string
+  tanggalExport?: string
+}
+
+export async function generateDataSiswaExcelWorkbook(options: ExportDataSiswaOptions): Promise<ExcelJS.Workbook> {
+  const { students, kelas, tahun, waliKelas, tanggalExport } = options
+  const actualExportTime = tanggalExport || getFormattedCurrentDateTime()
+
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet("Data Siswa")
+
+  // Lebar kolom
+  worksheet.columns = [
+    { key: "noAbs", width: 10 },
+    { key: "nisn", width: 18 },
+    { key: "nama", width: 35 },
+    { key: "gender", width: 10 },
+    { key: "kontakOrtu", width: 24 },
+  ]
+
+  // Baris 1: Judul
+  const r1 = worksheet.addRow(["DAFTAR DATA SISWA"])
+  worksheet.mergeCells("A1:E1")
+  r1.font = { name: "Arial", size: 12, bold: true }
+  r1.alignment = { horizontal: "center", vertical: "middle" }
+
+  // Baris 2: Subtitle
+  const r2 = worksheet.addRow([`TAHUN PELAJARAN ${tahun}`])
+  worksheet.mergeCells("A2:E2")
+  r2.font = { name: "Arial", size: 12, bold: true }
+  r2.alignment = { horizontal: "center", vertical: "middle" }
+
+  worksheet.addRow([]) // Baris kosong
+
+  // Baris 4: Info Kelas & Wali Kelas
+  const r4 = worksheet.addRow([
+    `KELAS : ${kelas}`,
+    "",
+    "",
+    "",
+    `Wali Kelas : ${waliKelas}`,
+  ])
+  r4.font = { name: "Arial", size: 11, bold: true }
+  r4.getCell(5).alignment = { horizontal: "right" }
+
+  // Baris 5: Header Kolom
+  const r5 = worksheet.addRow(["NO ABS", "NISN", "NAMA SISWA", "L/P", "KONTAK ORTU"])
+  r5.font = { name: "Arial", size: 11, bold: true }
+  r5.alignment = { horizontal: "center", vertical: "middle" }
+
+  const thinBorder: Partial<ExcelJS.Borders> = {
+    top: { style: "thin" },
+    left: { style: "thin" },
+    bottom: { style: "thin" },
+    right: { style: "thin" },
+  }
+
+  for (let c = 1; c <= 5; c++) {
+    const cell = r5.getCell(c)
+    cell.border = thinBorder
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE0E0E0" },
+    }
+  }
+
+  // Isi data siswa
+  students.forEach((s) => {
+    const row = worksheet.addRow([
+      s.noAbs,
+      s.nisn,
+      s.nama.toUpperCase(),
+      s.gender === "Laki-laki" || s.gender === "L" ? "L" : "P",
+      s.kontakOrtu && s.kontakOrtu !== "-" ? s.kontakOrtu : "-",
+    ])
+    row.font = { name: "Arial", size: 10 }
+
+    for (let c = 1; c <= 5; c++) {
+      row.getCell(c).border = thinBorder
+    }
+
+    row.getCell(1).alignment = { horizontal: "center" }
+    row.getCell(2).alignment = { horizontal: "center" }
+    row.getCell(4).alignment = { horizontal: "center" }
+    row.getCell(5).alignment = { horizontal: "center" }
+  })
+
+  // Rekap ringkasan jumlah siswa
+  worksheet.addRow([])
+  const countL = students.filter((s) => s.gender === "Laki-laki" || s.gender === "L").length
+  const countP = students.filter((s) => s.gender === "Perempuan" || s.gender === "P").length
+  const total = students.length
+
+  const rL = worksheet.addRow(["", `Jumlah Siswa Laki-laki (L): ${countL} Siswa`])
+  const rP = worksheet.addRow(["", `Jumlah Siswa Perempuan (P): ${countP} Siswa`])
+  const rTot = worksheet.addRow(["", `Total Siswa: ${total} Siswa`])
+    ;[rL, rP, rTot].forEach((r) => {
+      r.font = { name: "Arial", size: 10, bold: true }
+    })
+
+  // Footer waktu export
+  worksheet.addRow([])
+  const rExport = worksheet.addRow(["", `Waktu Export: ${actualExportTime}`])
+  rExport.font = { name: "Arial", size: 9, italic: true }
+
+  return workbook
+}
+
+export async function exportDataSiswaToExcel(options: ExportDataSiswaOptions) {
+  const workbook = await generateDataSiswaExcelWorkbook(options)
+  const filename = `Data_Siswa_${options.kelas.replace(/\s+/g, "_")}_${options.tahun.replace("/", "-")}.xlsx`
+
+  if (typeof window !== "undefined") {
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+}
+
+export function generateDataSiswaPDFDoc(options: ExportDataSiswaOptions): jsPDF {
+  const { students, kelas, tahun, waliKelas, tanggalExport } = options
+  const actualExportTime = tanggalExport || getFormattedCurrentDateTime()
+
+  const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" })
+
+  // Header Judul
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(14)
+  doc.text("DAFTAR DATA SISWA", 105, 15, { align: "center" })
+
+  doc.setFontSize(12)
+  doc.text(`TAHUN PELAJARAN ${tahun}`, 105, 22, { align: "center" })
+
+  // Metadata
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(9.5)
+  doc.text(`WAKTU EXPORT : ${actualExportTime}`, 14, 32)
+  doc.text(`KELAS       : ${kelas}`, 196, 32, { align: "right" })
+  doc.text(`Wali Kelas  : ${waliKelas}`, 196, 37, { align: "right" })
+
+  // Tabel Siswa
+  autoTable(doc, {
+    startY: 42,
+    head: [["NO ABS", "NISN", "NAMA SISWA", "L/P", "KONTAK ORTU"]],
+    body: students.map((s) => [
+      s.noAbs,
+      s.nisn,
+      s.nama.toUpperCase(),
+      s.gender === "Laki-laki" || s.gender === "L" ? "L" : "P",
+      s.kontakOrtu && s.kontakOrtu !== "-" ? s.kontakOrtu : "-",
+    ]),
+    theme: "grid",
+    styles: {
+      font: "helvetica",
+      fontSize: 8.5,
+      cellPadding: 2,
+    },
+    headStyles: {
+      fillColor: [240, 240, 240],
+      textColor: [0, 0, 0],
+      fontStyle: "bold",
+      halign: "center",
+      lineWidth: 0.2,
+      lineColor: [100, 100, 100],
+    },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 18 },
+      1: { halign: "center", cellWidth: 30 },
+      2: { halign: "left" },
+      3: { halign: "center", cellWidth: 16 },
+      4: { halign: "center", cellWidth: 38 },
+    },
+  })
+
+  // Rekap Data Siswa di Bawah Tabel
+  const countL = students.filter((s) => s.gender === "Laki-laki" || s.gender === "L").length
+  const countP = students.filter((s) => s.gender === "Perempuan" || s.gender === "P").length
+  const total = students.length
+
+  const finalY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 150
+
+  doc.setFontSize(9)
+  doc.setFont("helvetica", "bold")
+  doc.text("Ringkasan Data Siswa:", 14, finalY + 8)
+
+  doc.setFont("helvetica", "normal")
+  doc.text(`• Jumlah Siswa Laki-laki (L) : ${countL} siswa`, 14, finalY + 13)
+  doc.text(`• Jumlah Siswa Perempuan (P) : ${countP} siswa`, 14, finalY + 18)
+  doc.setFont("helvetica", "bold")
+  doc.text(`• Total Keseluruhan Siswa   : ${total} siswa`, 14, finalY + 23)
+
+  return doc
+}
+
+export function exportDataSiswaToPDF(options: ExportDataSiswaOptions) {
+  const doc = generateDataSiswaPDFDoc(options)
+  const filename = `Data_Siswa_${options.kelas.replace(/\s+/g, "_")}_${options.tahun.replace("/", "-")}.pdf`
+
+  if (typeof window !== "undefined") {
+    doc.save(filename)
+  }
+}
+
+
 export interface ExportTugasItem {
   noAbs: number
   nisn: string
@@ -346,6 +575,8 @@ export interface ExportTugasOptions {
   tahun: string
   waliKelas: string
   totalTasks: number
+  taskHeaders?: string[]
+  taskIds?: number[]
 }
 
 export async function generateTugasExcelWorkbook({
@@ -355,14 +586,21 @@ export async function generateTugasExcelWorkbook({
   tahun,
   waliKelas,
   totalTasks,
+  taskHeaders,
+  taskIds,
 }: ExportTugasOptions): Promise<ExcelJS.Workbook> {
   const workbook = new ExcelJS.Workbook()
   const worksheet = workbook.addWorksheet("Nilai Tugas")
 
+  const headers =
+    taskHeaders && taskHeaders.length === totalTasks
+      ? taskHeaders
+      : Array.from({ length: totalTasks }, (_, i) => `T${i + 1}`)
+
   // Dynamic columns: A: noAbs, B: nisn, C: nama, D: gender, E..: T1..T(totalTasks), Next: Rata-rata, Next: Status
-  const taskCols = Array.from({ length: totalTasks }, (_, i) => ({
+  const taskCols = headers.map((h, i) => ({
     key: `t${i + 1}`,
-    width: 8,
+    width: Math.max(8, Math.min(14, h.length + 2)),
   }))
 
   worksheet.columns = [
@@ -408,8 +646,7 @@ export async function generateTugasExcelWorkbook({
   r5.font = { name: "Arial", size: 11 }
 
   // Headers
-  const taskHeaders = Array.from({ length: totalTasks }, (_, i) => `T${i + 1}`)
-  const r6 = worksheet.addRow(["NO ABS", "NISN", "NAMA SISWA", "L/P", ...taskHeaders, "RATA-RATA", "STATUS"])
+  const r6 = worksheet.addRow(["NO ABS", "NISN", "NAMA SISWA", "L/P", ...headers, "RATA-RATA", "STATUS"])
   r6.font = { name: "Arial", size: 11, bold: true }
   r6.alignment = { horizontal: "center", vertical: "middle" }
 
@@ -433,7 +670,8 @@ export async function generateTugasExcelWorkbook({
   // Data rows
   students.forEach((s) => {
     const taskVals = Array.from({ length: totalTasks }, (_, i) => {
-      const taskData = s.scores[i + 1]
+      const targetId = taskIds && taskIds[i] !== undefined ? taskIds[i] : i + 1
+      const taskData = s.scores[targetId]
       if (!taskData) return "-"
       if (taskData.status === "DINILAI" && taskData.score !== null) return taskData.score
       if (taskData.status === "KUMPUL") return "Kumpul"
@@ -470,7 +708,7 @@ export async function generateTugasExcelWorkbook({
 }
 
 export function generateTugasPDFDoc(options: ExportTugasOptions): jsPDF {
-  const { students, mapel, kelas, tahun, waliKelas, totalTasks } = options
+  const { students, mapel, kelas, tahun, waliKelas, totalTasks, taskHeaders, taskIds } = options
   const doc = new jsPDF({ orientation: "l", unit: "mm", format: "a4" })
 
   doc.setFont("helvetica", "bold")
@@ -487,14 +725,18 @@ export function generateTugasPDFDoc(options: ExportTugasOptions): jsPDF {
   doc.text(`KELAS      : ${kelas}`, 283, 32, { align: "right" })
   doc.text(`Wali Kelas : ${waliKelas}`, 283, 37, { align: "right" })
 
-  const taskHeaders = Array.from({ length: totalTasks }, (_, i) => `T${i + 1}`)
+  const headers =
+    taskHeaders && taskHeaders.length === totalTasks
+      ? taskHeaders
+      : Array.from({ length: totalTasks }, (_, i) => `T${i + 1}`)
 
   autoTable(doc, {
     startY: 42,
-    head: [["NO ABS", "NISN", "NAMA SISWA", "L/P", ...taskHeaders, "RATA-RATA", "STATUS"]],
+    head: [["NO ABS", "NISN", "NAMA SISWA", "L/P", ...headers, "RATA-RATA", "STATUS"]],
     body: students.map((s) => {
       const taskVals = Array.from({ length: totalTasks }, (_, i) => {
-        const taskData = s.scores[i + 1]
+        const targetId = taskIds && taskIds[i] !== undefined ? taskIds[i] : i + 1
+        const taskData = s.scores[targetId]
         if (!taskData) return "-"
         if (taskData.status === "DINILAI" && taskData.score !== null) return String(taskData.score)
         if (taskData.status === "KUMPUL") return "Kumpul"
@@ -959,6 +1201,66 @@ const NAMA_BULAN_INDONESIA = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember"
 ]
 
+export function buildStudentMonthlyAttendance(
+  students: { noAbs: number; nisn: string; nama: string; gender: string }[],
+  monthlyData: Record<string, Record<number, { status: string; alasanDispen?: string }>>,
+  daysInMonth: number
+): StudentMonthlyAttendance[] {
+  return students.map((student, idx) => {
+    const studentRecords = monthlyData[student.nisn] || {}
+    const dailyStatus: Record<number, string> = {}
+    let totalHadir = 0
+    let totalSakit = 0
+    let totalIzin = 0
+    let totalAlpha = 0
+    let totalDispen = 0
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const rec = studentRecords[d]
+      const rawStatus = rec?.status ? rec.status.toUpperCase() : ""
+      if (!rawStatus || rawStatus === "-" || rawStatus === "–" || rawStatus === "BELUM_DICATAT") {
+        dailyStatus[d] = "–"
+      } else if (rawStatus === "HADIR" || rawStatus === "H") {
+        dailyStatus[d] = "H"
+        totalHadir++
+      } else if (rawStatus === "SAKIT" || rawStatus === "S") {
+        dailyStatus[d] = "S"
+        totalSakit++
+      } else if (rawStatus === "IZIN" || rawStatus === "I") {
+        dailyStatus[d] = "I"
+        totalIzin++
+      } else if (rawStatus === "ALPHA" || rawStatus === "A") {
+        dailyStatus[d] = "A"
+        totalAlpha++
+      } else if (rawStatus === "DISPEN" || rawStatus === "D") {
+        dailyStatus[d] = "D"
+        totalDispen++
+      } else {
+        dailyStatus[d] = "–"
+      }
+    }
+
+    const totalRecordedDays = totalHadir + totalSakit + totalIzin + totalAlpha + totalDispen
+    const percentage = totalRecordedDays > 0
+      ? Math.round(((totalHadir + totalDispen) / totalRecordedDays) * 100)
+      : 0
+
+    return {
+      noAbs: student.noAbs || idx + 1,
+      nisn: student.nisn,
+      nama: student.nama,
+      gender: student.gender,
+      dailyStatus,
+      totalHadir,
+      totalSakit,
+      totalIzin,
+      totalAlpha,
+      totalDispen,
+      percentage,
+    }
+  })
+}
+
 export async function generateMonthlyPresensiExcelWorkbook(
   options: ExportMonthlyPresensiOptions
 ): Promise<ExcelJS.Workbook> {
@@ -981,21 +1283,21 @@ export async function generateMonthlyPresensiExcelWorkbook(
   // Column definitions
   const dayCols = Array.from({ length: daysInMonth }, (_, i) => ({
     key: `d${i + 1}`,
-    width: 4,
+    width: 3.8,
   }))
 
   worksheet.columns = [
-    { key: "noAbs", width: 6 },
+    { key: "noAbs", width: 5 },
     { key: "nisn", width: 14 },
-    { key: "nama", width: 30 },
-    { key: "gender", width: 6 },
+    { key: "nama", width: 34 },
+    { key: "gender", width: 5 },
     ...dayCols,
-    { key: "H", width: 6 },
-    { key: "S", width: 6 },
-    { key: "I", width: 6 },
-    { key: "A", width: 6 },
-    { key: "D", width: 6 },
-    { key: "pct", width: 8 },
+    { key: "H", width: 5 },
+    { key: "S", width: 5 },
+    { key: "I", width: 5 },
+    { key: "A", width: 5 },
+    { key: "D", width: 5 },
+    { key: "pct", width: 7 },
   ]
 
   const totalColCount = 4 + daysInMonth + 6
@@ -1060,13 +1362,13 @@ export async function generateMonthlyPresensiExcelWorkbook(
     const dayVals = Array.from({ length: daysInMonth }, (_, i) => {
       const dNum = i + 1
       const st = student.dailyStatus[dNum]
-      if (!st || st === "-") return "-"
-      if (st === "HADIR") return "H"
-      if (st === "SAKIT") return "S"
-      if (st === "IZIN") return "I"
-      if (st === "ALPHA") return "A"
-      if (st === "DISPEN") return "D"
-      return "-"
+      if (!st || st === "-" || st === "–" || st === "BELUM_DICATAT") return "–"
+      if (st === "HADIR" || st === "H") return "H"
+      if (st === "SAKIT" || st === "S") return "S"
+      if (st === "IZIN" || st === "I") return "I"
+      if (st === "ALPHA" || st === "A") return "A"
+      if (st === "DISPEN" || st === "D") return "D"
+      return "–"
     })
 
     const row = worksheet.addRow([
@@ -1114,16 +1416,16 @@ export function generateMonthlyPresensiPDFDoc(options: ExportMonthlyPresensiOpti
   const doc = new jsPDF({ orientation: "l", unit: "mm", format: "a4" })
 
   doc.setFont("helvetica", "bold")
-  doc.setFontSize(13)
-  doc.text("REKAPITULASI PRESENSI BULANAN SISWA", 148.5, 12, { align: "center" })
+  doc.setFontSize(12)
+  doc.text("REKAPITULASI PRESENSI BULANAN SISWA", 148.5, 10, { align: "center" })
 
-  doc.setFontSize(10)
-  doc.text(`BULAN: ${bulanName.toUpperCase()} ${tahun}  |  TAHUN PELAJARAN ${tahunAjaran}`, 148.5, 17, { align: "center" })
+  doc.setFontSize(9)
+  doc.text(`BULAN: ${bulanName.toUpperCase()} ${tahun}  |  TAHUN PELAJARAN ${tahunAjaran}`, 148.5, 14.5, { align: "center" })
 
   doc.setFont("helvetica", "normal")
-  doc.setFontSize(9)
-  doc.text(`KELAS : ${kelas.toUpperCase()}`, 12, 23)
-  doc.text(`Wali Kelas : ${waliKelas}`, 285, 23, { align: "right" })
+  doc.setFontSize(8.5)
+  doc.text(`KELAS : ${kelas.toUpperCase()}`, 8, 19.5)
+  doc.text(`Wali Kelas : ${waliKelas}`, 289, 19.5, { align: "right" })
 
   const dayHeaders = Array.from({ length: daysInMonth }, (_, i) => String(i + 1))
   const headers = [
@@ -1136,13 +1438,13 @@ export function generateMonthlyPresensiPDFDoc(options: ExportMonthlyPresensiOpti
     const dayCells = Array.from({ length: daysInMonth }, (_, i) => {
       const dNum = i + 1
       const st = s.dailyStatus[dNum]
-      if (!st || st === "-") return "-"
-      if (st === "HADIR") return "H"
-      if (st === "SAKIT") return "S"
-      if (st === "IZIN") return "I"
-      if (st === "ALPHA") return "A"
-      if (st === "DISPEN") return "D"
-      return "-"
+      if (!st || st === "-" || st === "–" || st === "BELUM_DICATAT") return "–"
+      if (st === "HADIR" || st === "H") return "H"
+      if (st === "SAKIT" || st === "S") return "S"
+      if (st === "IZIN" || st === "I") return "I"
+      if (st === "ALPHA" || st === "A") return "A"
+      if (st === "DISPEN" || st === "D") return "D"
+      return "–"
     })
 
     return [
@@ -1160,38 +1462,48 @@ export function generateMonthlyPresensiPDFDoc(options: ExportMonthlyPresensiOpti
     ]
   })
 
-  // Dynamic column widths to ensure perfect single page fit
-  const colStyles: Record<number, any> = {
-    0: { halign: "center", cellWidth: 7 },
-    1: { halign: "center", cellWidth: 19 },
-    2: { halign: "left", cellWidth: 42 },
-    3: { halign: "center", cellWidth: 7 },
+  // Usable width: 297 - 16 (margin left 8, right 8) = 281 mm
+  // Fixed widths: NO: 6, NISN: 16, NAMA: 50, L/P: 6 = 78 mm
+  // Summary widths: H(5.5), S(5.5), I(5.5), A(5.5), D(5.5), %(8) = 35.5 mm
+  // Total fixed = 113.5 mm. Remaining for days: 281 - 113.5 = 167.5 mm.
+  const dayWidth = (281 - 113.5) / daysInMonth
+
+  const colStyles: Record<number, Partial<Styles>> = {
+    0: { halign: "center", cellWidth: 6 },
+    1: { halign: "center", cellWidth: 16 },
+    2: { halign: "left", cellWidth: 50 },
+    3: { halign: "center", cellWidth: 6 },
   }
 
-  const dayWidth = daysInMonth === 31 ? 4.9 : daysInMonth === 30 ? 5.0 : 5.3
   for (let i = 4; i < 4 + daysInMonth; i++) {
-    colStyles[i] = { halign: "center", cellWidth: dayWidth }
+    colStyles[i] = {
+      halign: "center",
+      cellWidth: dayWidth,
+      cellPadding: { top: 0.8, bottom: 0.8, left: 0.2, right: 0.2 },
+    }
   }
 
   const statStart = 4 + daysInMonth
-  colStyles[statStart] = { halign: "center", cellWidth: 6.5 } // H
-  colStyles[statStart + 1] = { halign: "center", cellWidth: 6.5 } // S
-  colStyles[statStart + 2] = { halign: "center", cellWidth: 6.5 } // I
-  colStyles[statStart + 3] = { halign: "center", cellWidth: 6.5 } // A
-  colStyles[statStart + 4] = { halign: "center", cellWidth: 6.5 } // D
-  colStyles[statStart + 5] = { halign: "center", cellWidth: 9 } // %
+  colStyles[statStart] = { halign: "center", cellWidth: 5.5 } // H
+  colStyles[statStart + 1] = { halign: "center", cellWidth: 5.5 } // S
+  colStyles[statStart + 2] = { halign: "center", cellWidth: 5.5 } // I
+  colStyles[statStart + 3] = { halign: "center", cellWidth: 5.5 } // A
+  colStyles[statStart + 4] = { halign: "center", cellWidth: 5.5 } // D
+  colStyles[statStart + 5] = { halign: "center", cellWidth: 8 } // %
 
   autoTable(doc, {
-    startY: 26,
-    margin: { left: 10, right: 10 },
+    startY: 22,
+    margin: { left: 8, right: 8, top: 8, bottom: 8 },
+    tableWidth: 281,
     head: [headers],
     body: bodyData,
     theme: "grid",
     styles: {
       font: "helvetica",
-      fontSize: 6.5,
-      cellPadding: 1.2,
-      overflow: "hidden",
+      fontSize: 6,
+      cellPadding: { top: 0.8, bottom: 0.8, left: 0.5, right: 0.5 },
+      overflow: "ellipsize",
+      minCellHeight: 3.8,
     },
     headStyles: {
       fillColor: [240, 240, 240],
@@ -1200,7 +1512,8 @@ export function generateMonthlyPresensiPDFDoc(options: ExportMonthlyPresensiOpti
       halign: "center",
       lineWidth: 0.15,
       lineColor: [120, 120, 120],
-      fontSize: 6.5,
+      fontSize: 5.8,
+      cellPadding: { top: 1, bottom: 1, left: 0.2, right: 0.2 },
     },
     columnStyles: colStyles,
   })

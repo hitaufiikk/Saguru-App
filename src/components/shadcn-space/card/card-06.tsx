@@ -5,10 +5,12 @@ import { Icon } from "@iconify/react"
 import { Card, CardContent } from "@/components/ui/card"
 import GlareHover from "@/components/glare-hover"
 import { JADWAL_BU_DEVY, getEffectiveScheduleDay } from "@/lib/data-jadwal"
-import { studentService } from "@/lib/services/studentService"
-import { tugasService } from "@/lib/services/tugasService"
+import { dashboardService } from "@/lib/services/dashboardService"
 
 const StatisticsCard = () => {
+  const [statsError, setStatsError] = useState(false)
+  const [recorded, setRecorded] = useState(0)
+  const [taskError, setTaskError] = useState(false)
   const [totalSiswa, setTotalSiswa] = useState(0)
   const [totalHadir, setTotalHadir] = useState(0)
   const [totalTugas, setTotalTugas] = useState(0)
@@ -24,106 +26,30 @@ const StatisticsCard = () => {
 
   useEffect(() => {
     let isMounted = true
+    let studentRequest = 0
 
     const updateStats = async () => {
-      // 1. Try Supabase first
+      const request = ++studentRequest
       try {
-        const allStudents = await studentService.getAllStudents()
-        if (isMounted && allStudents && allStudents.length > 0) {
-          const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
-          const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
-
-          // Map students by class to sync localStorage
-          const classMap: Record<string, any[]> = {}
-          allStudents.forEach((s) => {
-            const cCode = (s.kelas_code || "9a").toLowerCase()
-            if (!classMap[cCode]) classMap[cCode] = []
-            classMap[cCode].push({
-              noAbs: s.noAbs,
-              nisn: s.nisn,
-              nama: s.nama,
-              gender: s.gender,
-              status: s.status || "HADIR",
-              kontakOrtu: s.kontak_ortu || "-",
-            })
-          })
-
-          try {
-            localStorage.setItem("saguru_migrated_students", JSON.stringify(classMap))
-          } catch (e) {}
-
-          let count = 0
-          let hadir = 0
-          Object.keys(classMap).forEach((k) => {
-            const hiddenNisns: string[] = deletedMap[k] || []
-            const active = classMap[k].filter((s) => !hiddenNisns.includes(s.nisn))
-            count += active.length
-            hadir += active.filter((s) => !["DISPEN", "SAKIT", "ALPHA"].includes(s.status)).length
-          })
-
-          setTotalSiswa(count)
-          setTotalHadir(hadir)
-          return
-        }
-      } catch (err) {
-        console.warn("Supabase stats fetch fallback:", err)
-      }
-
-      // Fallback to local storage
-      try {
-        const stored = localStorage.getItem("saguru_migrated_students")
-        const deletedPresensi = localStorage.getItem("saguru_presensi_deleted_nisns")
-        const deletedMap = deletedPresensi ? JSON.parse(deletedPresensi) : {}
-
-        if (stored) {
-          const map = JSON.parse(stored)
-          let count = 0
-          let hadir = 0
-          Object.keys(map).forEach((k) => {
-            if (Array.isArray(map[k])) {
-              const hiddenNisns: string[] = deletedMap[k] || []
-              const active = map[k].filter((s: { nisn: string }) => !hiddenNisns.includes(s.nisn))
-              count += active.length
-              hadir += active.filter((s: { status?: string }) => {
-                const isAbsence = s.status && ["DISPEN", "SAKIT", "ALPHA"].includes(s.status)
-                return !isAbsence
-              }).length
-            }
-          })
-          if (isMounted) {
-            setTotalSiswa(count)
-            setTotalHadir(hadir)
-          }
-          return
-        }
-      } catch (err) {}
-
-      if (isMounted) {
-        setTotalSiswa(0)
-        setTotalHadir(0)
+        const stats = await dashboardService.attendance()
+        if (!isMounted || request !== studentRequest) return
+        setTotalSiswa(stats.total)
+        setTotalHadir(stats.present)
+        setRecorded(stats.recorded)
+        setStatsError(false)
+      } catch {
+        if (isMounted && request === studentRequest) setStatsError(true)
       }
     }
-
+    let taskRequest = 0
     const updateTaskCount = async () => {
+      const request = ++taskRequest
       try {
-        const tasks = await tugasService.getTasksByClass("9a")
-        if (isMounted && tasks && tasks.length > 0) {
-          setTotalTugas(tasks.length)
-          return
-        }
-      } catch (err) {}
-
-      try {
-        const stored = localStorage.getItem("saguru_tasks_list")
-        if (stored) {
-          const list = JSON.parse(stored)
-          if (Array.isArray(list)) {
-            if (isMounted) setTotalTugas(list.length)
-            return
-          }
-        }
-      } catch (err) {}
-      if (isMounted) setTotalTugas(0)
+        const count = await dashboardService.taskCount()
+        if (!isMounted || request !== taskRequest) return
+        setTotalTugas(count)
+        setTaskError(false)
+      } catch { if (isMounted && request === taskRequest) setTaskError(true) }
     }
 
     const updateJadwalInfo = () => {
@@ -143,11 +69,15 @@ const StatisticsCard = () => {
     updateStats()
     updateTaskCount()
     updateJadwalInfo()
+    const timer = window.setInterval(updateStats, 60_000)
 
     window.addEventListener("saguru-data-updated", updateStats)
     window.addEventListener("saguru-tasks-updated", updateTaskCount)
 
     return () => {
+      window.clearInterval(timer)
+      isMounted = false
+      studentRequest++
       window.removeEventListener("saguru-data-updated", updateStats)
       window.removeEventListener("saguru-tasks-updated", updateTaskCount)
     }
@@ -158,20 +88,20 @@ const StatisticsCard = () => {
   const TeacherActions = [
     {
       title: "Data Siswa",
-      subtitle: `${totalSiswa} Siswa`,
-      subtext: totalSiswa > 0 ? "Terdaftar Aktif" : "Belum Ada Siswa",
+      subtitle: statsError ? "—" : `${totalSiswa} Siswa`,
+      subtext: statsError ? "Gagal memuat data" : totalSiswa > 0 ? "Terdaftar Aktif" : "Belum Ada Siswa",
       cardIcon: "solar:users-group-two-rounded-bold-duotone",
     },
     {
       title: "Presensi Hari Ini",
-      subtitle: totalSiswa > 0 ? `${presensiPercentage}%` : "0%",
-      subtext: totalSiswa > 0 ? `${totalHadir} Siswa Hadir` : "Belum Ada Data",
+      subtitle: statsError ? "—" : `${presensiPercentage}%`,
+      subtext: statsError ? "Gagal memuat presensi" : recorded > 0 ? `${totalHadir} Hadir • ${totalSiswa - recorded} Belum Dicatat` : "Belum Ada Presensi Tercatat",
       cardIcon: "solar:clipboard-check-bold-duotone",
     },
     {
       title: "Tagihan Tugas",
-      subtitle: `${totalTugas} Tugas`,
-      subtext: totalTugas === 0 ? "Belum Ada Tugas" : `${totalSiswa} Siswa Terdaftar`,
+      subtitle: taskError ? "—" : `${totalTugas} Tugas`,
+      subtext: taskError ? "Gagal memuat tugas" : totalTugas === 0 ? "Belum Ada Tugas" : `${totalSiswa} Siswa Terdaftar`,
       cardIcon: "solar:document-text-bold-duotone",
     },
     {

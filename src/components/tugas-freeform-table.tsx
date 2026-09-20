@@ -15,7 +15,6 @@ import {
   Users,
   AlertCircle,
   Tag,
-  Trash2,
   CloudOff,
   RefreshCw,
 } from "lucide-react"
@@ -116,69 +115,74 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
 
   // Current selected class
   const currentKelas = kelasCode.toLowerCase()
+  const [refreshCount, setRefreshCount] = useState(0)
 
   // Load students & notes from LocalStorage & Supabase
-  const loadData = React.useCallback(async (showRefreshing = false) => {
-    if (showRefreshing) setIsRefreshing(true)
-    else setIsLoading(true)
+  useEffect(() => {
+    let isMounted = true
 
-    try {
-      // 1. Check local cache
-      const localKey = `sag_binaan_notes_${currentKelas}`
-      const localData = typeof window !== "undefined" ? localStorage.getItem(localKey) : null
-      let localNotesMap: Record<string, string> = {}
-      if (localData) {
-        try {
-          localNotesMap = JSON.parse(localData)
-          setNotes(localNotesMap)
-        } catch {
-          // ignore
+    const loadData = async () => {
+      try {
+        // 1. Check local cache
+        const localKey = `sag_binaan_notes_${currentKelas}`
+        const localData = typeof window !== "undefined" ? localStorage.getItem(localKey) : null
+        let localNotesMap: Record<string, string> = {}
+        if (localData) {
+          try {
+            localNotesMap = JSON.parse(localData)
+          } catch {
+            // ignore
+          }
         }
-      }
 
-      // 2. Fetch from Supabase
-      const [supStudents, supExclusions, supNotes] = await Promise.all([
-        studentService.getStudentsByClass(currentKelas),
-        tugasService.getTugasExclusions(currentKelas),
-        tugasService.getBinaanNotes(currentKelas),
-      ])
+        // 2. Fetch from Supabase
+        const [supStudents, supNotes] = await Promise.all([
+          studentService.getStudentsByClass(currentKelas),
+          tugasService.getBinaanNotes(currentKelas),
+        ])
 
-      // Set students
-      if (supStudents && supStudents.length > 0) {
-        setStudents(
-          supStudents
-            .filter((s) => !supExclusions.includes(s.nisn))
-            .map((s, idx) => ({
+        if (!isMounted) return
+        // Set students
+        if (supStudents) {
+          setStudents(
+            supStudents.map((s, idx) => ({
               noAbs: s.noAbs || idx + 1,
               nisn: s.nisn,
               nama: s.nama,
               gender: s.gender || "Laki-laki",
             }))
-        )
-      } else {
-        setStudents(defaultStudents)
-      }
+          )
+        } else {
+          setStudents([])
+        }
 
-      // Merge Supabase notes with priority to remote data
-      const mergedNotes = { ...localNotesMap, ...supNotes }
-      setNotes(mergedNotes)
-      if (typeof window !== "undefined") {
-        localStorage.setItem(localKey, JSON.stringify(mergedNotes))
+        // Merge Supabase notes with priority to remote data
+        const mergedNotes = { ...localNotesMap, ...supNotes }
+        setNotes(mergedNotes)
+        if (typeof window !== "undefined") {
+          localStorage.setItem(localKey, JSON.stringify(mergedNotes))
+        }
+      } catch (err) {
+        console.error("Error loading binaan notes:", err)
+      } finally {
+        if (isMounted) {
+          setIsLoading(false)
+          setIsRefreshing(false)
+        }
       }
-    } catch (err) {
-      console.error("Error loading binaan notes:", err)
-      if (students.length === 0) {
-        setStudents(defaultStudents)
-      }
-    } finally {
-      setIsLoading(false)
-      setIsRefreshing(false)
     }
-  }, [currentKelas, students.length])
 
-  useEffect(() => {
-    loadData()
-  }, [currentKelas, loadData])
+    void loadData()
+
+    const handleUpdate = () => {
+      setRefreshCount((c) => c + 1)
+    }
+    window.addEventListener("saguru-data-updated", handleUpdate)
+    return () => {
+      isMounted = false
+      window.removeEventListener("saguru-data-updated", handleUpdate)
+    }
+  }, [currentKelas, refreshCount])
 
   // Handle Note Change with Auto-Save
   const handleNoteChange = (nisn: string, text: string) => {
@@ -276,17 +280,6 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
     }
   }
 
-  // Exclude / Hide student
-  const handleExcludeStudent = async (nisn: string) => {
-    if (!confirm("Sembunyikan siswa ini dari daftar tagihan tugas?")) return
-    try {
-      await tugasService.addTugasExclusion(nisn, currentKelas)
-      setStudents((prev) => prev.filter((s) => s.nisn !== nisn))
-    } catch (err) {
-      console.error("Error excluding student:", err)
-    }
-  }
-
   // Filtered Students
   const filteredStudents = useMemo(() => {
     if (!searchTerm.trim()) return students
@@ -368,7 +361,10 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
           <Button
             variant="outline"
             size="sm"
-            onClick={() => loadData(true)}
+            onClick={() => {
+              setIsRefreshing(true)
+              setRefreshCount((c) => c + 1)
+            }}
             disabled={isRefreshing}
             className="h-9 px-2.5 gap-1.5 text-xs font-medium cursor-pointer"
             title="Sinkronkan ulang dengan Cloud Supabase"
@@ -464,7 +460,7 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
 
       {/* 3. Search Bar */}
       <div className="flex items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative w-full sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Cari siswa berdasarkan nama atau NISN..."
@@ -473,7 +469,7 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
               setSearchTerm(e.target.value)
               setCurrentPage(1)
             }}
-            className="pl-9 h-9 text-xs sm:text-sm bg-background"
+            className="pl-9 h-9 text-xs sm:text-sm bg-background w-full"
           />
         </div>
       </div>
@@ -495,8 +491,8 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
       ) : (
         <div className="space-y-4">
           {/* A. Desktop & Tablet View: Shadcn Table */}
-          <div className="hidden md:block rounded-xl border border-border bg-card overflow-hidden shadow-xs">
-            <Table>
+          <div className="hidden md:block rounded-xl border border-border bg-card overflow-x-auto shadow-xs">
+            <Table className="min-w-[640px]">
               <TableHeader>
                 <TableRow className="bg-muted/50">
                   <TableHead className="text-center w-14 font-semibold text-xs">No</TableHead>
@@ -504,7 +500,6 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
                   <TableHead className="min-w-[160px] font-semibold text-xs">Nama Siswa</TableHead>
                   <TableHead className="text-center w-14 font-semibold text-xs">L/P</TableHead>
                   <TableHead className="min-w-[320px] font-semibold text-xs">Catatan / Tagihan Tugas Bebas</TableHead>
-                  <TableHead className="text-center w-16 font-semibold text-xs">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -615,19 +610,6 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
                           </div>
                         </div>
                       </TableCell>
-
-                      {/* Aksi */}
-                      <TableCell className="text-center align-top pt-4">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleExcludeStudent(student.nisn)}
-                          className="h-8 w-8 text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 cursor-pointer"
-                          title="Sembunyikan siswa dari tagihan tugas"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
                     </TableRow>
                   )
                 })}
@@ -670,14 +652,7 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
                       >
                         {student.gender === "Laki-laki" || student.gender === "L" ? "L" : "P"}
                       </Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleExcludeStudent(student.nisn)}
-                        className="h-7 w-7 text-muted-foreground hover:text-rose-600 cursor-pointer"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+
                     </div>
                   </div>
 

@@ -7,7 +7,10 @@ import {
   ParsedStudentRow,
   SkippedRowInfo,
   validateStudentsForSave,
+  mergeStudentsCache,
+  CachedStudentItem,
 } from "@/lib/import-utils"
+import { studentService } from "@/lib/services/studentService"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -79,6 +82,7 @@ export function MigrasiDataForm() {
   // Empty initial state until file upload
   const [fileName, setFileName] = useState<string>("")
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false)
+  const [isSaving, setIsSaving] = useState<boolean>(false)
   const [showPreview, setShowPreview] = useState<boolean>(true)
   const [parsedData, setParsedData] = useState<ParsedStudentRow[]>([])
   const [totalRows, setTotalRows] = useState<number>(0)
@@ -99,6 +103,8 @@ export function MigrasiDataForm() {
     rejectedCount: number
     skippedCount: number
     tahun: string
+    cacheFailed?: boolean
+    cacheErrorMessage?: string
   } | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -110,6 +116,8 @@ export function MigrasiDataForm() {
       const file = e.target.files[0]
       setFileName(file.name)
       setIsLoadingFile(true)
+      setParsedData([])
+      setTotalRows(0)
       setSkippedRows([])
       setShowSkippedDetails(false)
       setShowValidationDetails(false)
@@ -135,11 +143,12 @@ export function MigrasiDataForm() {
             const textContent = await page.getTextContent()
 
             const lineMap: { [y: number]: string[] } = {}
-            textContent.items.forEach((item: any) => {
-              if (!item.str || !item.str.trim()) return
-              const y = Math.round(item.transform[5])
+            textContent.items.forEach((item: unknown) => {
+              const textItem = item as { str?: string; transform?: number[] }
+              if (!textItem.str || !textItem.str.trim()) return
+              const y = Math.round(textItem.transform?.[5] ?? 0)
               if (!lineMap[y]) lineMap[y] = []
-              lineMap[y].push(item.str.trim())
+              lineMap[y].push(textItem.str.trim())
             })
 
             const sortedY = Object.keys(lineMap)
@@ -208,16 +217,10 @@ export function MigrasiDataForm() {
             setParsedData(rowsData)
             setTotalRows(rowsData.length)
           } else {
-            // Sample data fallback jika PDF kosong
-            const pdfExtracted: ParsedStudentRow[] = [
-              { noAbs: 1, nisn: "0089123001", identityType: "NISN", nama: "Ahmad Fauzi (PDF)", gender: "Laki-laki", status: "HADIR" },
-              { noAbs: 2, nisn: "0089123002", identityType: "NISN", nama: "Aisha Rahmawati (PDF)", gender: "Perempuan", status: "HADIR" },
-              { noAbs: 3, nisn: "0089123003", identityType: "NISN", nama: "Budi Santoso (PDF)", gender: "Laki-laki", status: "HADIR" },
-              { noAbs: 4, nisn: "0089123004", identityType: "NISN", nama: "Cantika Putri (PDF)", gender: "Perempuan", status: "HADIR" },
-              { noAbs: 5, nisn: "0089123005", identityType: "NISN", nama: "Deni Kurniawan (PDF)", gender: "Laki-laki", status: "HADIR" },
-            ]
-            setParsedData(pdfExtracted)
-            setTotalRows(pdfExtracted.length)
+            // PDF tidak menghasilkan data valid: kosongkan dan beri tahu pengguna tanpa fallback data contoh palsu
+            setParsedData([])
+            setTotalRows(0)
+            alert("Tidak ditemukan data siswa yang valid pada berkas PDF tersebut.")
           }
         } else {
           // Parse Excel (.xlsx, .xls) / CSV files via modul produksi parseSpreadsheetData
@@ -226,6 +229,8 @@ export function MigrasiDataForm() {
 
           if (result.error) {
             alert(result.error)
+            setParsedData([])
+            setTotalRows(0)
             setIsLoadingFile(false)
             return
           }
@@ -241,16 +246,23 @@ export function MigrasiDataForm() {
             alert("Tidak ditemukan data siswa yang valid pada berkas tersebut.")
           }
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("Gagal membaca berkas:", err)
+        setParsedData([])
+        setTotalRows(0)
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        alert(`Gagal membaca berkas: ${errorMsg}`)
       } finally {
         setIsLoadingFile(false)
       }
     }
   }
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    // Penjagaan submit ganda
+    if (isSaving) return
+
     if (!fileName || parsedData.length === 0) {
       alert("Silakan unggah berkas .pdf atau .xlsx yang memiliki data siswa terlebih dahulu!")
       return
@@ -270,50 +282,83 @@ export function MigrasiDataForm() {
       return
     }
 
-    // 2. Simpan ke penyimpanan lokal browser HANYA data siswa yang valid
+    setIsSaving(true)
+
     try {
-      const existing = localStorage.getItem("saguru_migrated_students")
-      const existingMap = existing ? JSON.parse(existing) : {}
-      existingMap[classCode] = validation.validStudents
-      localStorage.setItem("saguru_migrated_students", JSON.stringify(existingMap))
-      window.dispatchEvent(new Event("saguru-data-updated"))
-    } catch (err: any) {
-      console.error("Gagal menyimpan data migrasi ke penyimpanan browser:", err)
-      alert(
-        `Gagal menyimpan data ke penyimpanan lokal browser: ${
-          err?.message || "Kapasitas penyimpanan penuh atau akses dibatasi."
-        }`
+      // 2. Simpan ke Supabase terlebih dahulu sebagai penyimpanan utama
+      const saveResult = await studentService.saveMigratedStudents(
+        validation.validStudents,
+        classCode,
+        waliKelas
       )
-      return
-    }
 
-    const currentTahunOption = tahunSemesterOptions.find(
-      (opt: { value: string; label: string }) => opt.value === tahunSemester
-    )
-    const selectedTahunLabel = currentTahunOption
-      ? currentTahunOption.label
-      : "2026/2027 - Semester Genap"
+      if (!saveResult.success) {
+        // Jika Supabase gagal, pertahankan berkas dan pratinjau agar bisa dicoba kembali
+        alert(saveResult.error || "Gagal menyimpan data siswa ke database Supabase.")
+        return
+      }
 
-    setSubmittedInfo({
-      fileName,
-      wali: waliKelas,
-      kelas: targetClassName,
-      total: validation.totalValid,
-      rejectedCount: validation.totalRejected,
-      skippedCount: skippedRows.length,
-      tahun: selectedTahunLabel,
-    })
-    setIsSuccessModalOpen(true)
+      // 3. Setelah Supabase berhasil, perbarui cache lokal dengan mempertahankan siswa lain
+      let cacheFailed = false
+      let cacheErrorMessage = ""
+      try {
+        const existing = localStorage.getItem("saguru_migrated_students")
+        const existingMap: Record<string, CachedStudentItem[]> = existing ? JSON.parse(existing) : {}
+        const updatedMap = mergeStudentsCache(existingMap, classCode, validation.validStudents)
+        localStorage.setItem("saguru_migrated_students", JSON.stringify(updatedMap))
+        window.dispatchEvent(new Event("saguru-data-updated"))
+      } catch (cacheErr: unknown) {
+        console.error("Gagal memperbarui cache lokal browser:", cacheErr)
+        cacheFailed = true
+        cacheErrorMessage =
+          cacheErr instanceof Error ? cacheErr.message : "Kapasitas penyimpanan lokal penuh atau akses dibatasi."
+      }
 
-    // Reset form & preview state after successful upload
-    setFileName("")
-    setParsedData([])
-    setTotalRows(0)
-    setSkippedRows([])
-    setShowSkippedDetails(false)
-    setShowValidationDetails(false)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ""
+      // 4. Jika cache lokal gagal setelah Supabase berhasil, jelaskan bahwa data sudah tersimpan di server
+      if (cacheFailed) {
+        alert(
+          "PERHATIAN: Data siswa telah BERHASIL disimpan ke database server Supabase. " +
+            `Namun, sinkronisasi cache lokal peramban gagal (${cacheErrorMessage}). ` +
+            "Data Anda aman di server dan akan disinkronkan saat membuka tabel siswa."
+        )
+      }
+
+      const currentTahunOption = tahunSemesterOptions.find(
+        (opt: { value: string; label: string }) => opt.value === tahunSemester
+      )
+      const selectedTahunLabel = currentTahunOption
+        ? currentTahunOption.label
+        : "2026/2027 - Semester Genap"
+
+      setSubmittedInfo({
+        fileName,
+        wali: waliKelas,
+        kelas: targetClassName,
+        total: validation.totalValid,
+        rejectedCount: validation.totalRejected,
+        skippedCount: skippedRows.length,
+        tahun: selectedTahunLabel,
+        cacheFailed,
+        cacheErrorMessage,
+      })
+      setIsSuccessModalOpen(true)
+
+      // Reset form & preview state hanya setelah penyimpanan Supabase berhasil
+      setFileName("")
+      setParsedData([])
+      setTotalRows(0)
+      setSkippedRows([])
+      setShowSkippedDetails(false)
+      setShowValidationDetails(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    } catch (err: unknown) {
+      console.error("Kesalahan tak terduga saat menyimpan migrasi data:", err)
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      alert(`Terjadi kesalahan tak terduga: ${errorMsg}`)
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -321,7 +366,7 @@ export function MigrasiDataForm() {
     <div className="w-full">
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         {/* LEFT COLUMN: FORM INPUT */}
-        <div className="lg:col-span-5 p-6 rounded-2xl border border-border bg-card shadow-md flex flex-col justify-between space-y-5">
+        <div className="lg:col-span-5 p-4 sm:p-6 rounded-2xl border border-border bg-card shadow-md flex flex-col justify-between space-y-5">
           <FieldSet className="space-y-4">
             <div className="space-y-1">
               <FieldLegend className="text-base font-bold text-foreground">Migrasi Data Siswa</FieldLegend>
@@ -342,7 +387,8 @@ export function MigrasiDataForm() {
                   type="file"
                   accept=".pdf, .xlsx, .xls, .csv, application/pdf"
                   onChange={handleFileChange}
-                  className="cursor-pointer text-xs h-9 bg-background file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#4274D9]/10 file:text-[#4274D9]"
+                  disabled={isSaving || isLoadingFile}
+                  className="cursor-pointer text-xs h-9 bg-background file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#4274D9]/10 file:text-[#4274D9] disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </Field>
 
@@ -351,8 +397,8 @@ export function MigrasiDataForm() {
                 <FieldLabel htmlFor="migrasi-tahun-semester" className="text-xs font-semibold text-foreground">
                   Tahun Ajaran &amp; Semester
                 </FieldLabel>
-                <Select value={tahunSemester} onValueChange={(val) => { if (val) setTahunSemester(val) }}>
-                  <SelectTrigger id="migrasi-tahun-semester" className="h-9 text-xs bg-background">
+                <Select value={tahunSemester} onValueChange={(val) => { if (val) setTahunSemester(val) }} disabled={isSaving}>
+                  <SelectTrigger id="migrasi-tahun-semester" className="h-9 text-xs bg-background disabled:opacity-50 disabled:cursor-not-allowed">
                     <SelectValue placeholder="Pilih Semester" />
                   </SelectTrigger>
                   <SelectContent>
@@ -369,13 +415,14 @@ export function MigrasiDataForm() {
               </Field>
 
               {/* Grid 3 Columns: Jenis Penugasan, Pilih Kelas, Format Kolom */}
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <Field className="space-y-1">
                   <FieldLabel htmlFor="migrasi-jenis" className="text-xs font-semibold text-foreground">
                     Jenis Penugasan
                   </FieldLabel>
                   <Select
                     value={jenisPenugasan}
+                    disabled={isSaving}
                     onValueChange={(val) => {
                       if (!val) return
                       setJenisPenugasan(val)
@@ -390,7 +437,7 @@ export function MigrasiDataForm() {
                       }
                     }}
                   >
-                    <SelectTrigger id="migrasi-jenis" className="h-9 text-xs bg-background">
+                    <SelectTrigger id="migrasi-jenis" className="h-9 text-xs bg-background disabled:opacity-50 disabled:cursor-not-allowed">
                       <SelectValue placeholder="Jenis" />
                     </SelectTrigger>
                     <SelectContent>
@@ -406,6 +453,7 @@ export function MigrasiDataForm() {
                   </FieldLabel>
                   <Select
                     value={pilihKelas}
+                    disabled={isSaving}
                     onValueChange={(val) => {
                       if (!val) return
                       setPilihKelas(val)
@@ -418,7 +466,7 @@ export function MigrasiDataForm() {
                       }
                     }}
                   >
-                    <SelectTrigger id="migrasi-kelas" className="h-9 text-xs bg-background font-semibold">
+                    <SelectTrigger id="migrasi-kelas" className="h-9 text-xs bg-background font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
                       <SelectValue placeholder="Kelas" />
                     </SelectTrigger>
                     <SelectContent>
@@ -445,14 +493,20 @@ export function MigrasiDataForm() {
             <Button
               type="submit"
               disabled={
+                isSaving ||
                 isLoadingFile ||
                 !fileName ||
                 parsedData.length === 0 ||
                 validationResult.validStudents.length === 0
               }
-              className="w-full bg-[#4274D9] hover:bg-[#3561bd] disabled:opacity-50 text-white text-xs h-9 gap-2 cursor-pointer font-semibold shadow-sm"
+              className="w-full bg-[#4274D9] hover:bg-[#3561bd] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs h-9 gap-2 cursor-pointer font-semibold shadow-sm"
             >
-              {isLoadingFile ? (
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Menyimpan ke Supabase...</span>
+                </>
+              ) : isLoadingFile ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>Memproses Berkas...</span>
@@ -468,7 +522,7 @@ export function MigrasiDataForm() {
         </div>
 
         {/* RIGHT COLUMN: PRATINJAU DATA */}
-        <div className="lg:col-span-7 p-6 rounded-2xl border border-border bg-card shadow-md flex flex-col justify-between space-y-4 min-h-[380px]">
+        <div className="lg:col-span-7 p-4 sm:p-6 rounded-2xl border border-border bg-card shadow-md flex flex-col justify-between space-y-4 min-h-[380px]">
           {fileName && parsedData.length > 0 ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -573,7 +627,7 @@ export function MigrasiDataForm() {
                 <div className="rounded-xl border border-border bg-background overflow-hidden max-h-[260px] overflow-y-auto">
                   <Table>
                     <Table.ScrollContainer>
-                      <Table.Content aria-label="Pratinjau Berkas" className="min-w-full">
+                      <Table.Content aria-label="Pratinjau Berkas" className="min-w-[480px]">
                         <Table.Header>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">No</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">Identitas (NISN / NIS)</Table.Column>
@@ -689,7 +743,7 @@ export function MigrasiDataForm() {
               Migrasi Data Siswa Berhasil Disimpan!
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground text-center">
-              Data berkas telah berhasil divalidasi dan disimpan ke dalam penyimpanan lokal browser (klien) untuk kelas ini.
+              Data berkas telah berhasil divalidasi dan disimpan ke database server Supabase sebagai penyimpanan utama.
             </DialogDescription>
           </DialogHeader>
 
@@ -709,7 +763,7 @@ export function MigrasiDataForm() {
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Tujuan Penyimpanan:</span>
                 <Badge variant="outline" className="font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30 text-[10px]">
-                  Penyimpanan Lokal Browser
+                  Database Server Supabase (Utama)
                 </Badge>
               </div>
               <div className="flex items-center justify-between">
@@ -747,6 +801,11 @@ export function MigrasiDataForm() {
                 <span className="text-muted-foreground">Wali Kelas:</span>
                 <span className="font-medium text-foreground">{submittedInfo.wali}</span>
               </div>
+              {submittedInfo.cacheFailed && (
+                <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-200 text-[11px] leading-relaxed">
+                  <strong>Catatan Cache:</strong> Data telah aman tersimpan di database server Supabase. Namun, pembaruan cache peramban lokal mengalami kendala ({submittedInfo.cacheErrorMessage}).
+                </div>
+              )}
             </div>
           )}
 
@@ -761,11 +820,12 @@ export function MigrasiDataForm() {
             />
             <Button
               variant="outline"
+              nativeButton={false}
               onClick={() => setIsSuccessModalOpen(false)}
-              render={<Link href={submittedInfo?.kelas.toLowerCase() === "9a" ? "/siswa/9a" : "/siswa/binaan"} />}
+              render={<Link href={`/siswa/${submittedInfo?.kelas.toLowerCase() || "9a"}`} />}
               className="w-full sm:w-auto h-8 text-xs cursor-pointer gap-1.5 font-medium"
             >
-              <span>{submittedInfo?.kelas.toLowerCase() === "9a" ? "Lihat Data Siswa 9A" : "Lihat Data Siswa Binaan"}</span>
+              <span>{`Lihat Data Siswa ${submittedInfo?.kelas || "9A"}`}</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </Button>
           </DialogFooter>
@@ -774,5 +834,4 @@ export function MigrasiDataForm() {
     </div>
   )
 }
-
 

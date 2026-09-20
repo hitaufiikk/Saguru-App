@@ -9,6 +9,9 @@ import { ModeToggle } from "@/components/mode-toggle"
 import { BrandLink } from "@/components/brand-link"
 import { Footer } from "@/components/footer"
 import { SidebarProvider } from "@/components/ui/sidebar"
+import { createSessionAccessGate } from "@/lib/session-access"
+import { hasTeacherAccess } from "@/lib/services/authService"
+import { supabase } from "@/lib/supabase"
 import { AppSidebar } from "@/components/app-sidebar"
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
@@ -17,39 +20,42 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const isLoginPage = pathname === "/login"
   const [isAuthenticated, setIsAuthenticated] = React.useState<boolean | null>(null)
 
+  const [accessError, setAccessError] = React.useState("")
+
+  const accessGate = React.useRef(createSessionAccessGate())
+
   React.useEffect(() => {
-    // Clear initial mock student data for testing stage
-    try {
-      const isCleared = localStorage.getItem("saguru_data_cleared_v2")
-      if (!isCleared) {
-        const emptyMap = { "9a": [], "9b": [], "8h": [], "8i": [] }
-        localStorage.setItem("saguru_migrated_students", JSON.stringify(emptyMap))
-        localStorage.setItem("saguru_tasks_list", JSON.stringify([]))
-        localStorage.setItem("saguru_grades_matrix", JSON.stringify({}))
-        localStorage.setItem("saguru_data_cleared_v2", "true")
-        window.dispatchEvent(new Event("saguru-data-updated"))
-        window.dispatchEvent(new Event("saguru-tasks-updated"))
-      }
-    } catch (err) {}
-
-    if (isLoginPage) {
-      setIsAuthenticated(true)
-      return
-    }
-
-    try {
-      const auth = localStorage.getItem("saguru_is_authenticated")
-      if (auth === "true") {
-        setIsAuthenticated(true)
-      } else {
+    const gate = accessGate.current
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const current = gate.begin(session?.user.id ?? null)
+      if (!active) return
+      clearTimeout(timer)
+      if (!session) {
         setIsAuthenticated(false)
-        router.push("/login")
+        setAccessError("")
+        if (!isLoginPage) router.replace("/login")
+        return
       }
-    } catch (err) {
-      setIsAuthenticated(false)
-      router.push("/login")
-    }
-  }, [pathname, isLoginPage, router])
+      if (!current.keepMounted) {
+        setIsAuthenticated(false)
+      }
+      // Run outside the auth callback to avoid holding the auth client's lock.
+      timer = setTimeout(async () => {
+        try {
+          const allowed = await hasTeacherAccess(session.user.id)
+          if (!active || !current.isCurrent()) return
+          current.resolve(allowed)
+          setIsAuthenticated(allowed)
+          setAccessError(allowed ? "" : "Akun Anda belum diberi akses guru.")
+        } catch {
+          if (active && current.isCurrent()) setAccessError("Tidak dapat memeriksa akses. Periksa koneksi lalu muat ulang halaman.")
+        }
+      }, 0)
+    })
+    return () => { active = false; gate.invalidate(); clearTimeout(timer); subscription.unsubscribe() }
+  }, [isLoginPage, router])
 
   if (isLoginPage) {
     return (
@@ -66,8 +72,11 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (isAuthenticated === false) {
-    return null
+  if (isAuthenticated !== true) {
+    return <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6">
+      <p role="status">{accessError || "Memeriksa akses akun..."}</p>
+      {accessError && <a href="/login" className="underline">Kembali ke halaman masuk</a>}
+    </div>
   }
 
   return (
@@ -80,7 +89,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       <SidebarProvider defaultOpen={false}>
         <AppSidebar />
         <div className="flex-1 flex flex-col min-h-screen w-full">
-          <header className="sticky top-0 z-50 w-full border-b border-blue-400/30 bg-[#4274D9] text-white dark:bg-[#0F172A] dark:text-[#60A5FA] dark:border-[#1E293B] backdrop-blur-md px-4 sm:px-6 py-3 flex items-center justify-between transition-colors duration-200">
+          <header className="sticky top-0 z-50 w-full border-b border-blue-400/30 bg-[#4274D9] text-white dark:bg-[#0F172A] dark:text-[#60A5FA] dark:border-[#1E293B] backdrop-blur-md px-3 sm:px-6 py-2 sm:py-2.5 lg:py-3 flex items-center justify-between transition-colors duration-200">
             {/* Desktop Left Brand "SAGURU" */}
             <div className="hidden lg:flex items-center">
               <BrandLink />
@@ -98,6 +107,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
+          {accessError && <p role="alert" className="p-3 text-sm bg-amber-100 text-amber-950">{accessError} Isian Anda tetap terbuka; penyimpanan tetap memerlukan izin server.</p>}
           <main className="flex-1 font-sans">{children}</main>
 
           <Footer />

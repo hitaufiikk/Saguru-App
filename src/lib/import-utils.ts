@@ -460,3 +460,64 @@ export function validateStudentsForSave(students: ParsedStudentRow[]): StudentVa
   }
 }
 
+export interface CachedStudentItem {
+  noAbs?: number
+  nisn: string
+  nis?: string
+  identityType?: "NISN" | "NIS" | "TIDAK_ADA"
+  nama: string
+  gender: string
+  status?: string
+  alasanDispen?: string
+  kontakOrtu?: string
+  [key: string]: unknown
+}
+
+/**
+ * Memperbarui cache lokal siswa untuk kelas tertentu (upsert berbasis nisn)
+ * tanpa menghapus siswa lain di kelas tersebut dan mempertahankan kelas lain.
+ */
+export function mergeStudentsCache(
+  existingCacheMap: Record<string, CachedStudentItem[]> | null | undefined,
+  classCode: string,
+  newStudents: ParsedStudentRow[]
+): Record<string, CachedStudentItem[]> {
+  const normalizedClassCode = (classCode || "").toLowerCase().trim()
+  const updatedMap: Record<string, CachedStudentItem[]> = existingCacheMap ? { ...existingCacheMap } : {}
+
+  const currentClassStudents: CachedStudentItem[] = Array.isArray(updatedMap[normalizedClassCode])
+    ? [...updatedMap[normalizedClassCode]]
+    : []
+
+  const newNisns = new Set(newStudents.map((s) => (s.nisn || "").trim()))
+
+  // Pertahankan siswa lama yang tidak ada di berkas baru
+  const preservedStudents = currentClassStudents.filter(
+    (s) => !newNisns.has((s.nisn || "").trim())
+  )
+
+  // Perbarui atau tambahkan siswa dari berkas baru
+  const mergedNewStudents = newStudents.map((ns) => {
+    const existingStudent = currentClassStudents.find(
+      (es) => (es.nisn || "").trim() === (ns.nisn || "").trim()
+    )
+    return {
+      ...ns,
+      status: existingStudent?.status || ns.status || "HADIR",
+      ...(existingStudent?.alasanDispen ? { alasanDispen: existingStudent.alasanDispen } : {}),
+      ...(existingStudent?.kontakOrtu ? { kontakOrtu: existingStudent.kontakOrtu } : {}),
+    }
+  })
+
+  const combined = [...preservedStudents, ...mergedNewStudents]
+
+  // Urutkan nomor absensi secara berurutan
+  const indexedList = combined.map((s, idx) => ({
+    ...s,
+    noAbs: idx + 1,
+  }))
+
+  updatedMap[normalizedClassCode] = indexedList
+  return updatedMap
+}
+

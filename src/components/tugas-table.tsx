@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { BinaanClassDropdown } from "@/components/binaan-class-dropdown"
@@ -19,13 +19,14 @@ import {
   HelpCircle,
   ChevronRight,
   Sparkles,
-  Trash2,
   UserPlus,
+  Trash2,
+  Edit,
+  Info,
 } from "lucide-react"
 
 import { Table } from "@heroui/react"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -63,7 +64,7 @@ import {
 import { cn } from "@/lib/utils"
 import { exportTugasToExcel, exportTugasToPDF } from "@/lib/export-utils"
 import { studentService } from "@/lib/services/studentService"
-import { tugasService } from "@/lib/services/tugasService"
+import { tugasService, parseTaskTitle, formatTaskTitle } from "@/lib/services/tugasService"
 
 // Types
 export interface StudentBase {
@@ -71,6 +72,7 @@ export interface StudentBase {
   nisn: string
   nama: string
   gender: string
+  kontakOrtu?: string
 }
 
 export interface TaskDefinition {
@@ -78,6 +80,8 @@ export interface TaskDefinition {
   mapel: string
   kelasCode?: string
   title: string
+  label?: string
+  topic?: string
   deadline: string
   maxScore: number
 }
@@ -90,83 +94,67 @@ export interface TaskGradeRecord {
   catatan?: string
 }
 
-const defaultStudents: StudentBase[] = [
-  { noAbs: 1, nisn: "0081234561", nama: "Ahmad Fauzi", gender: "Laki-laki" },
-  { noAbs: 2, nisn: "0081234562", nama: "Aisha Rahma", gender: "Perempuan" },
-  { noAbs: 3, nisn: "0081234563", nama: "Budi Santoso", gender: "Laki-laki" },
-  { noAbs: 4, nisn: "0081234564", nama: "Cantika Putri", gender: "Perempuan" },
-  { noAbs: 5, nisn: "0081234565", nama: "Deni Kurniawan", gender: "Laki-laki" },
-  { noAbs: 6, nisn: "0081234566", nama: "Dewi Lestari", gender: "Perempuan" },
-  { noAbs: 7, nisn: "0081234567", nama: "Eko Prasetyo", gender: "Laki-laki" },
-  { noAbs: 8, nisn: "0081234568", nama: "Fitri Handayani", gender: "Perempuan" },
-  { noAbs: 9, nisn: "0081234569", nama: "Gilang Ramadhan", gender: "Laki-laki" },
-  { noAbs: 10, nisn: "0081234570", nama: "Hania Nabila", gender: "Perempuan" },
-  { noAbs: 11, nisn: "0081234571", nama: "Indra Wijaya", gender: "Laki-laki" },
-  { noAbs: 12, nisn: "0081234572", nama: "Jasmine Kartika", gender: "Perempuan" },
-  { noAbs: 13, nisn: "0081234573", nama: "Kevin Pratama", gender: "Laki-laki" },
-  { noAbs: 14, nisn: "0081234574", nama: "Larasati Anggraini", gender: "Perempuan" },
-  { noAbs: 15, nisn: "0081234575", nama: "Muhammad Rizky", gender: "Laki-laki" },
-]
-
 export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const router = useRouter()
-  const [students, setStudents] = useState<StudentBase[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem("saguru_migrated_students")
-        const deletedTugas = localStorage.getItem("saguru_tugas_deleted_nisns")
-        const deletedMap = deletedTugas ? JSON.parse(deletedTugas) : {}
-        const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
-
-        if (stored) {
-          const map = JSON.parse(stored)
-          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
-            const classStudents: StudentBase[] = map[kelasCode?.toLowerCase()]
-            return classStudents.filter((s) => !hiddenNisns.includes(s.nisn))
-          }
-        }
-      } catch (err) {
-        console.error("Error reading localStorage:", err)
-      }
-    }
-    return []
-  })
+  const [students, setStudents] = useState<StudentBase[]>([])
   const [selectedMapel, setSelectedMapel] = useState("Matematika")
   const [searchQuery, setSearchQuery] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
 
+  const savingRef = useRef(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [loadError, setLoadError] = useState("")
+  const [hasLegacyData, setHasLegacyData] = useState(false)
+
   // Tasks definitions state
-  const [tasks, setTasks] = useState<TaskDefinition[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem("saguru_tasks_list")
-        if (stored) {
-          return JSON.parse(stored)
-        }
-      } catch (err) {}
-    }
-    return []
-  })
+  const [tasks, setTasks] = useState<TaskDefinition[]>([])
 
   // Grade matrix state
-  const [grades, setGrades] = useState<Record<string, TaskGradeRecord>>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem("saguru_grades_matrix")
-        if (stored) {
-          return JSON.parse(stored)
-        }
-      } catch (err) {}
-    }
-    return {}
-  })
+  const [grades, setGrades] = useState<Record<string, TaskGradeRecord>>({})
 
   // Fetch from Supabase + localStorage on mount and when kelasCode changes
   useEffect(() => {
     let isMounted = true
+    let request = 0
 
     const loadData = async () => {
+      const current = ++request
+      if (savingRef.current) return
+
+
+      // Baca cache lokal di client setelah mount untuk mencegah hydration mismatch
+      try {
+        setHasLegacyData(Boolean(localStorage.getItem("saguru_tasks_list") && localStorage.getItem("saguru_tasks_list") !== "[]"))
+        const stored = localStorage.getItem("saguru_migrated_students")
+        if (stored && isMounted && current === request) {
+          const map = JSON.parse(stored)
+          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
+            setStudents(map[kelasCode?.toLowerCase()])
+          }
+        }
+        const storedTasks = localStorage.getItem(`saguru_tasks_server_${kelasCode.toLowerCase()}`)
+        if (storedTasks && isMounted && current === request) {
+          const parsed = JSON.parse(storedTasks)
+          if (Array.isArray(parsed)) {
+            setTasks(
+              parsed.map((t: TaskDefinition, idx: number) => {
+                const pt = parseTaskTitle(t.title, idx + 1)
+                return {
+                  ...t,
+                  label: t.label || pt.label,
+                  topic: t.topic || pt.topic,
+                }
+              })
+            )
+          }
+        }
+        const storedGrades = localStorage.getItem(`saguru_grades_server_${kelasCode.toLowerCase()}`)
+        if (storedGrades && isMounted && current === request) {
+          setGrades(JSON.parse(storedGrades))
+        }
+      } catch { }
+
       try {
         const [dbStudents, dbTasks, dbGrades] = await Promise.all([
           studentService.getStudentsByClass(kelasCode),
@@ -174,72 +162,80 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
           tugasService.getGradesByClass(kelasCode),
         ])
 
+        if (!isMounted || current !== request || savingRef.current) return
         if (isMounted) {
-          if (dbStudents && dbStudents.length > 0) {
-            const deletedTugas = localStorage.getItem("saguru_tugas_deleted_nisns")
-            const deletedMap = deletedTugas ? JSON.parse(deletedTugas) : {}
-            const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
+          if (dbStudents) {
 
             const formatted: StudentBase[] = dbStudents
-              .filter((s) => !hiddenNisns.includes(s.nisn))
               .map((s, index) => ({
                 noAbs: s.noAbs || index + 1,
                 nisn: s.nisn,
                 nama: s.nama,
                 gender: s.gender || "Laki-laki",
+                kontakOrtu: s.kontak_ortu || "-",
               }))
             setStudents(formatted)
+            try {
+              const map = JSON.parse(localStorage.getItem("saguru_migrated_students") || "{}")
+              const existing = new Map<string, StudentBase>((map[kelasCode.toLowerCase()] || []).map((s: StudentBase) => [s.nisn, s]))
+              map[kelasCode.toLowerCase()] = formatted.map((s) => ({ ...existing.get(s.nisn), ...s }))
+              localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
+            } catch { /* The server result remains authoritative if caching fails. */ }
           }
 
-          if (dbTasks && dbTasks.length > 0) {
-            const formattedTasks: TaskDefinition[] = dbTasks.map((t, idx) => ({
-              id: t.id,
-              mapel: t.mapel || "Matematika",
-              kelasCode: t.kelas_code,
-              title: t.title,
-              deadline: "2026-08-28, 23:59 WIB",
-              maxScore: 100,
-            }))
+          if (dbTasks) {
+            const formattedTasks: TaskDefinition[] = dbTasks.map((t, idx) => {
+              const parsed = parseTaskTitle(t.title, idx + 1)
+              return {
+                id: t.id,
+                mapel: t.mapel || "Matematika",
+                kelasCode: t.kelas_code,
+                title: t.title,
+                label: t.label || parsed.label,
+                topic: t.topic || parsed.topic,
+                deadline: t.deadline || "",
+                maxScore: 100,
+              }
+            })
             setTasks(formattedTasks)
             try {
-              localStorage.setItem("saguru_tasks_list", JSON.stringify(formattedTasks))
+              localStorage.setItem(`saguru_tasks_server_${kelasCode.toLowerCase()}`, JSON.stringify(formattedTasks))
             } catch (e) {}
           }
 
-          if (dbGrades && Object.keys(dbGrades).length > 0) {
+          if (dbGrades) {
             const formattedGrades: Record<string, TaskGradeRecord> = {}
             Object.keys(dbGrades).forEach((k) => {
               const g = dbGrades[k]
               formattedGrades[k] = {
                 score: g.score,
                 status: (g.status as TaskStatusType) || "BELUM",
-                catatan: "",
+                catatan: g.catatan || "",
               }
             })
-            setGrades((prev) => ({ ...prev, ...formattedGrades }))
+            setGrades(formattedGrades)
             try {
-              const storedGrades = localStorage.getItem("saguru_grades_matrix")
-              const existing = storedGrades ? JSON.parse(storedGrades) : {}
-              localStorage.setItem("saguru_grades_matrix", JSON.stringify({ ...existing, ...formattedGrades }))
+              localStorage.setItem(`saguru_grades_server_${kelasCode.toLowerCase()}`, JSON.stringify(formattedGrades))
             } catch (e) {}
           }
         }
+        setLoadError("")
+        return
       } catch (err) {
+        if (isMounted && current === request) setLoadError("Data server gagal dimuat. Data cache mungkin belum terbaru.")
         console.warn("Supabase tugas load fallback:", err)
       }
 
+      if (!isMounted || current !== request || savingRef.current) return
       // Fallback
       try {
         const stored = localStorage.getItem("saguru_migrated_students")
-        const deletedTugas = localStorage.getItem("saguru_tugas_deleted_nisns")
-        const deletedMap = deletedTugas ? JSON.parse(deletedTugas) : {}
-        const hiddenNisns: string[] = deletedMap[kelasCode?.toLowerCase()] || []
 
         if (stored) {
           const map = JSON.parse(stored)
           if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
             const classStudents: StudentBase[] = map[kelasCode?.toLowerCase()]
-            if (isMounted) setStudents(classStudents.filter((s) => !hiddenNisns.includes(s.nisn)))
+            if (isMounted) setStudents(classStudents)
           }
         }
       } catch (err) {}
@@ -254,6 +250,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     window.addEventListener("saguru-tasks-updated", handleUpdate)
     return () => {
       isMounted = false
+      request++
       window.removeEventListener("saguru-data-updated", handleUpdate)
       window.removeEventListener("saguru-tasks-updated", handleUpdate)
     }
@@ -261,8 +258,24 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
   // State Dialog Buat Tugas Baru
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false)
+  const [newLabel, setNewLabel] = useState("")
   const [newTitle, setNewTitle] = useState("")
-  const [newDeadline, setNewDeadline] = useState("2026-08-28, 23:59 WIB")
+  const [newDeadline, setNewDeadline] = useState("")
+
+  // State Dialog Daftar Tugas per Mapel
+  const [isTaskListOpen, setIsTaskListOpen] = useState(false)
+
+  // State Dialog Informasi Lebih Lanjut Tugas
+  const [selectedDetailTask, setSelectedDetailTask] = useState<TaskDefinition | null>(null)
+
+  // State Dialog Edit Tugas
+  const [editingTask, setEditingTask] = useState<TaskDefinition | null>(null)
+  const [editLabel, setEditLabel] = useState("")
+  const [editTitle, setEditTitle] = useState("")
+  const [editDeadline, setEditDeadline] = useState("")
+
+  // State Dialog Konfirmasi Hapus Tugas
+  const [taskToDelete, setTaskToDelete] = useState<TaskDefinition | null>(null)
 
   // State Quick Grade Modal
   const [gradeModalTarget, setGradeModalTarget] = useState<{
@@ -281,43 +294,6 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const [exportTahun, setExportTahun] = useState("2025/2026")
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
-  // Persistent Multi-select Key
-  const storageKey = `saguru_selected_tugas_${kelasCode.toLowerCase()}_${selectedMapel}`
-
-  // Multi-select & Bulk Delete State
-  const [isSelectionMode, setIsSelectionMode] = useState(false)
-  const [selectedNisns, setSelectedNisns] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem(storageKey)
-        if (stored) return JSON.parse(stored)
-      } catch (err) {}
-    }
-    return []
-  })
-  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
-
-  // Load selection when kelasCode or selectedMapel changes
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(storageKey)
-      if (stored) {
-        setSelectedNisns(JSON.parse(stored))
-      } else {
-        setSelectedNisns([])
-      }
-    } catch (err) {
-      setSelectedNisns([])
-    }
-  }, [kelasCode, selectedMapel, storageKey])
-
-  const saveSelectedNisns = (newSelected: string[]) => {
-    setSelectedNisns(newSelected)
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(newSelected))
-    } catch (err) {}
-  }
-
   // Current mapel tasks
   const mapelTasks = useMemo(() => {
     return tasks
@@ -333,43 +309,6 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         s.nisn.includes(searchQuery)
     )
   }, [students, searchQuery])
-
-  const isAllSelected = filteredStudents.length > 0 && filteredStudents.every((s) => selectedNisns.includes(s.nisn))
-
-  const handleToggleHeaderCheckbox = () => {
-    if (isAllSelected) {
-      saveSelectedNisns([])
-    } else {
-      saveSelectedNisns(filteredStudents.map((s) => s.nisn))
-    }
-  }
-
-  const handleToggleSelect = (nisn: string) => {
-    const next = selectedNisns.includes(nisn)
-      ? selectedNisns.filter((id) => id !== nisn)
-      : [...selectedNisns, nisn]
-    saveSelectedNisns(next)
-  }
-
-  const handleExecuteBulkDelete = () => {
-    const updatedStudents = students.filter((s) => !selectedNisns.includes(s.nisn))
-    setStudents(updatedStudents)
-    try {
-      const deletedTugas = localStorage.getItem("saguru_tugas_deleted_nisns")
-      const deletedMap = deletedTugas ? JSON.parse(deletedTugas) : {}
-      const existingHidden: string[] = deletedMap[kelasCode.toLowerCase()] || []
-      const newHidden = Array.from(new Set([...existingHidden, ...selectedNisns]))
-      deletedMap[kelasCode.toLowerCase()] = newHidden
-      localStorage.setItem("saguru_tugas_deleted_nisns", JSON.stringify(deletedMap))
-
-      localStorage.removeItem(storageKey)
-      window.dispatchEvent(new Event("saguru-tasks-updated"))
-    } catch (err) {}
-
-    saveSelectedNisns([])
-    setIsBulkDeleteOpen(false)
-    setIsSelectionMode(false)
-  }
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / itemsPerPage))
@@ -406,33 +345,168 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     }
   }
 
+  // Helper: Calculate Task Metrics for Detail Dialog
+  const calculateTaskMetrics = (taskId: number) => {
+    let dinilaiCount = 0
+    let kumpulCount = 0
+    let terlambatCount = 0
+    let belumCount = 0
+    let totalScore = 0
+    let maxScore: number | null = null
+    let minScore: number | null = null
+
+    students.forEach((s) => {
+      const g = getGrade(s.nisn, taskId)
+      if (g.status === "DINILAI" && g.score !== null) {
+        dinilaiCount++
+        totalScore += g.score
+        if (maxScore === null || g.score > maxScore) maxScore = g.score
+        if (minScore === null || g.score < minScore) minScore = g.score
+      } else if (g.status === "KUMPUL") {
+        kumpulCount++
+      } else if (g.status === "TERLAMBAT") {
+        terlambatCount++
+      } else {
+        belumCount++
+      }
+    })
+
+    const avgScore = dinilaiCount > 0 ? totalScore / dinilaiCount : null
+
+    return {
+      dinilaiCount,
+      kumpulCount,
+      terlambatCount,
+      belumCount,
+      totalStudents: students.length,
+      avgScore,
+      maxScore,
+      minScore,
+    }
+  }
+
   // Submit Buat Tugas Baru
-  const handleCreateTask = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleCreateTask = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (mapelTasks.length >= 30) {
-      alert("Batas maksimal 30 tugas per mata pelajaran telah tercapai.")
-      return
-    }
-
-    const nextId = mapelTasks.length > 0 ? Math.max(...mapelTasks.map((t) => t.id)) + 1 : 1
-    const newTaskObj: TaskDefinition = {
-      id: nextId,
-      mapel: selectedMapel,
-      kelasCode: kelasCode.toLowerCase(),
-      title: newTitle.trim() || `Tugas ${nextId}`,
-      deadline: newDeadline.trim() || "2026-08-30, 23:59 WIB",
-      maxScore: 100,
-    }
-
-    const updated = [...tasks, newTaskObj]
-    setTasks(updated)
+    if (savingRef.current) return
+    if (mapelTasks.length >= 30) { alert("Batas maksimal 30 tugas per mata pelajaran."); return }
+    savingRef.current = true
+    setIsSaving(true)
     try {
-      localStorage.setItem("saguru_tasks_list", JSON.stringify(updated))
+      const taskLabel = newLabel.trim() || `Tugas ${mapelTasks.length + 1}`
+      const formattedTitle = formatTaskTitle(taskLabel, newTitle)
+      const saved = await tugasService.addTask(formattedTitle, selectedMapel, kelasCode, newDeadline)
+      if (!saved) throw new Error("Tugas tidak tersimpan.")
+      const updated: TaskDefinition[] = [
+        ...tasks,
+        {
+          id: saved.id,
+          title: saved.title,
+          label: saved.label || taskLabel,
+          topic: saved.topic || newTitle.trim() || taskLabel,
+          mapel: saved.mapel,
+          kelasCode: saved.kelas_code,
+          deadline: saved.deadline || "",
+          maxScore: 100,
+        },
+      ]
+      setTasks(updated)
+      try { localStorage.setItem(`saguru_tasks_server_${kelasCode.toLowerCase()}`, JSON.stringify(updated)) }
+      catch { alert("Tugas tersimpan di server, tetapi cache browser gagal diperbarui.") }
+      setNewTitle("")
+      setNewLabel("")
+      setNewDeadline("")
+      setIsAddTaskOpen(false)
+      setToastMessage(`Tugas "${taskLabel}" berhasil ditambahkan.`)
+    } catch { alert("Gagal menyimpan tugas ke server. Form tetap tersedia untuk dicoba kembali.") }
+    finally {
+      savingRef.current = false
+      setIsSaving(false)
       window.dispatchEvent(new Event("saguru-tasks-updated"))
-    } catch (err) {}
+    }
+  }
 
-    setNewTitle("")
-    setIsAddTaskOpen(false)
+  // Buka Modal Edit Tugas
+  const handleOpenEditTask = (task: TaskDefinition) => {
+    setEditingTask(task)
+    setEditLabel(task.label || `Tugas ${task.id}`)
+    setEditTitle(task.topic || task.title)
+    setEditDeadline(task.deadline || "")
+  }
+
+  // Simpan Perubahan Edit Tugas
+  const handleSaveEditTask = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!editingTask || savingRef.current) return
+    savingRef.current = true
+    setIsSaving(true)
+    try {
+      const taskLabel = editLabel.trim() || editingTask.label || `Tugas ${editingTask.id}`
+      const formattedTitle = formatTaskTitle(taskLabel, editTitle)
+      const ok = await tugasService.updateTask(editingTask.id, kelasCode, {
+        title: formattedTitle,
+        deadline: editDeadline,
+      })
+      if (!ok) throw new Error("Gagal mengupdate tugas.")
+      const updated = tasks.map((t) => {
+        if (t.id === editingTask.id) {
+          return {
+            ...t,
+            title: formattedTitle,
+            label: taskLabel,
+            topic: editTitle.trim() || taskLabel,
+            deadline: editDeadline.trim(),
+          }
+        }
+        return t
+      })
+      setTasks(updated)
+      try { localStorage.setItem(`saguru_tasks_server_${kelasCode.toLowerCase()}`, JSON.stringify(updated)) } catch {}
+
+      if (selectedDetailTask && selectedDetailTask.id === editingTask.id) {
+        setSelectedDetailTask({
+          ...selectedDetailTask,
+          title: formattedTitle,
+          label: taskLabel,
+          topic: editTitle.trim() || taskLabel,
+          deadline: editDeadline.trim(),
+        })
+      }
+      setEditingTask(null)
+      setToastMessage(`Tugas "${taskLabel}" berhasil diperbarui.`)
+    } catch {
+      alert("Gagal memperbarui tugas di server.")
+    } finally {
+      savingRef.current = false
+      setIsSaving(false)
+      window.dispatchEvent(new Event("saguru-tasks-updated"))
+    }
+  }
+
+  // Konfirmasi Hapus Tugas
+  const handleConfirmDeleteTask = async () => {
+    if (!taskToDelete || savingRef.current) return
+    savingRef.current = true
+    setIsSaving(true)
+    try {
+      const ok = await tugasService.deleteTask(taskToDelete.id, kelasCode)
+      if (!ok) throw new Error("Gagal menghapus tugas dari server.")
+      const updated = tasks.filter((t) => t.id !== taskToDelete.id)
+      setTasks(updated)
+      try { localStorage.setItem(`saguru_tasks_server_${kelasCode.toLowerCase()}`, JSON.stringify(updated)) } catch {}
+
+      if (selectedDetailTask && selectedDetailTask.id === taskToDelete.id) {
+        setSelectedDetailTask(null)
+      }
+      setToastMessage(`Tugas "${taskToDelete.label || taskToDelete.title}" berhasil dihapus.`)
+      setTaskToDelete(null)
+    } catch {
+      alert("Gagal menghapus tugas dari server.")
+    } finally {
+      savingRef.current = false
+      setIsSaving(false)
+      window.dispatchEvent(new Event("saguru-tasks-updated"))
+    }
   }
 
   // Open Quick Grade Modal
@@ -445,29 +519,30 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   }
 
   // Save Quick Grade
-  const handleSaveGrade = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSaveGrade = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!gradeModalTarget) return
-
+    if (!gradeModalTarget || savingRef.current) return
     const { student, task } = gradeModalTarget
-    const key = `${student.nisn}_${kelasCode.toLowerCase()}_${selectedMapel}_${task.id}`
-    const parsedScore = inputScore.trim() !== "" ? Math.min(100, Math.max(0, Number(inputScore))) : null
-
-    const updatedGrades = {
-      ...grades,
-      [key]: {
-        score: parsedScore,
-        status: inputStatus,
-        catatan: inputCatatan.trim(),
-      },
+    const score = inputScore.trim() === "" ? null : Number(inputScore)
+    if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100)) {
+      alert("Nilai harus antara 0 dan 100."); return
     }
-    setGrades(updatedGrades)
+    const key = `${student.nisn}_${kelasCode.toLowerCase()}_${task.mapel}_${task.id}`
+    savingRef.current = true
+    setIsSaving(true)
     try {
-      localStorage.setItem("saguru_grades_matrix", JSON.stringify(updatedGrades))
+      await tugasService.saveGrade(task.id, student.nisn, kelasCode, score, inputStatus, task.mapel, inputCatatan)
+      const updated = { ...grades, [key]: { score, status: inputStatus, catatan: inputCatatan.trim() } }
+      setGrades(updated)
+      try { localStorage.setItem(`saguru_grades_server_${kelasCode.toLowerCase()}`, JSON.stringify(updated)) }
+      catch { alert("Nilai tersimpan di server, tetapi cache browser gagal diperbarui.") }
+      setGradeModalTarget(null)
+    } catch { alert("Gagal menyimpan nilai ke server. Isian tetap tersedia untuk dicoba kembali.") }
+    finally {
+      savingRef.current = false
+      setIsSaving(false)
       window.dispatchEvent(new Event("saguru-tasks-updated"))
-    } catch (err) {}
-
-    setGradeModalTarget(null)
+    }
   }
 
   // Export Submit
@@ -503,6 +578,8 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
           tahun: exportTahun,
           waliKelas: exportWaliKelas,
           totalTasks: mapelTasks.length,
+          taskHeaders: mapelTasks.map((t, idx) => t.label || `T${idx + 1}`),
+          taskIds: mapelTasks.map((t) => t.id),
         })
       } else {
         exportTugasToPDF({
@@ -512,6 +589,8 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
           tahun: exportTahun,
           waliKelas: exportWaliKelas,
           totalTasks: mapelTasks.length,
+          taskHeaders: mapelTasks.map((t, idx) => t.label || `T${idx + 1}`),
+          taskIds: mapelTasks.map((t) => t.id),
         })
       }
     } catch (err) {
@@ -524,6 +603,9 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
   return (
     <div className="space-y-4">
+      {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
+      {hasLegacyData && <p className="text-sm text-muted-foreground">Data tugas lokal lama tetap disimpan di browser dan belum dipindahkan ke server. Daftar ini menampilkan tugas server.</p>}
+
       {/* Action Bar: Search & Select Mapel on Left, Tambah Tugas & Export on Right */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Left: Search Input & Select Mapel */}
@@ -559,9 +641,19 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         </div>
 
         {/* Right: Tambah Tugas & Export Buttons */}
-        <div className="flex items-center gap-2 justify-end shrink-0">
+        <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end">
           {/* Popover Tambah Tugas Baru */}
-          <Popover open={isAddTaskOpen} onOpenChange={setIsAddTaskOpen}>
+          <Popover
+            open={isAddTaskOpen}
+            onOpenChange={(open) => {
+              if (!savingRef.current) {
+                if (open && !newLabel) {
+                  setNewLabel(`Tugas ${mapelTasks.length + 1}`)
+                }
+                setIsAddTaskOpen(open)
+              }
+            }}
+          >
             <PopoverTrigger render={
               <Button
                 size="sm"
@@ -572,7 +664,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               </Button>
             } />
             <PopoverContent className="w-80 p-4 shadow-xl">
-              <form onSubmit={handleCreateTask} className="space-y-3">
+              <form onSubmit={handleCreateTask} className="space-y-3"><fieldset disabled={isSaving} className="space-y-3">
                 <div className="space-y-1">
                   <h4 className="font-semibold text-sm leading-none text-foreground">Buat Tugas Baru</h4>
                   <p className="text-xs text-muted-foreground">Mapel: <strong className="text-foreground">{selectedMapel}</strong> (Kelas {kelasCode.toUpperCase()})</p>
@@ -580,12 +672,16 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
                 <FieldGroup className="space-y-2.5">
                   <Field>
-                    <Label className="text-xs font-semibold">Tugas Ke-</Label>
+                    <Label htmlFor="popover-task-label" className="text-xs font-semibold">Nomor / Label Tugas</Label>
                     <Input
-                      value={`Tugas ${mapelTasks.length + 1}`}
-                      disabled
-                      className="h-9 text-xs bg-muted font-mono font-bold"
+                      id="popover-task-label"
+                      value={newLabel}
+                      onChange={(e) => setNewLabel(e.target.value)}
+                      placeholder={`Contoh: Tugas ${mapelTasks.length + 1}, UH 1, PR 2`}
+                      className="h-9 text-xs font-semibold font-mono"
+                      required
                     />
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Bebas diubah: Tugas 1, UH 1, PR 2, Proyek, dll.</p>
                   </Field>
 
                   <Field>
@@ -594,7 +690,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                       id="popover-task-title"
                       value={newTitle}
                       onChange={(e) => setNewTitle(e.target.value)}
-                      placeholder="Masukkan judul tugas..."
+                      placeholder="Contoh: Operasi Aljabar, SPLDV..."
                       className="h-9 text-xs"
                       required
                       autoFocus
@@ -620,9 +716,25 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                     Simpan
                   </Button>
                 </div>
-              </form>
+              </fieldset></form>
             </PopoverContent>
           </Popover>
+
+          {/* Tombol Katalog / Daftar Tugas */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setIsTaskListOpen(true)}
+            className="h-9 px-3 text-xs sm:text-sm gap-1.5 border-border hover:bg-accent cursor-pointer font-medium"
+          >
+            <BookOpen className="h-4 w-4 text-[#4274D9]" />
+            <span>Daftar Tugas</span>
+            {mapelTasks.length > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[#4274D9]/15 text-[#4274D9]">
+                {mapelTasks.length}
+              </span>
+            )}
+          </Button>
 
           {/* Dropdown Pilihan Kelas Binaan (Sebelah Tambah Tugas) */}
           {kelasCode.toLowerCase() !== "9a" && (
@@ -630,45 +742,6 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               selectedKelas={kelasCode.toLowerCase()}
               onSelectKelas={(val) => router.push(`/tugas/${val}`)}
             />
-          )}
-
-          {/* Tombol Hapus Data & Mode Seleksi */}
-          {!isSelectionMode ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 px-3 text-xs sm:text-sm gap-1.5 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer font-medium"
-              onClick={() => setIsSelectionMode(true)}
-              disabled={students.length === 0}
-            >
-              <Trash2 className="h-4 w-4" />
-              <span>Hapus Data</span>
-            </Button>
-          ) : (
-            <div className="flex items-center gap-1.5 animate-in fade-in">
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={selectedNisns.length === 0}
-                className="h-9 px-3 text-xs sm:text-sm gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer font-medium"
-                onClick={() => setIsBulkDeleteOpen(true)}
-              >
-                <Trash2 className="h-4 w-4" />
-                <span>Hapus ({selectedNisns.length})</span>
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 px-3 text-xs sm:text-sm cursor-pointer border-border hover:bg-accent text-muted-foreground"
-                onClick={() => {
-                  setIsSelectionMode(false)
-                  saveSelectedNisns([])
-                }}
-              >
-                Batal
-              </Button>
-            </div>
           )}
 
           {/* Tombol Export */}
@@ -689,29 +762,34 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         <Table.ScrollContainer>
           <Table.Content aria-label={`Data Tugas Siswa Kelas ${kelasCode.toUpperCase()}`} className="min-w-[760px]">
             <Table.Header>
-              {isSelectionMode && (
-                <Table.Column className="w-10 text-center animate-in fade-in">
-                  <div className="flex items-center justify-center">
-                    <Checkbox
-                      checked={isAllSelected}
-                      onCheckedChange={handleToggleHeaderCheckbox}
-                      aria-label="Pilih Semua Siswa Tagihan Tugas"
-                      className="cursor-pointer"
-                    />
-                  </div>
-                </Table.Column>
-              )}
+
               <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
               <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
               <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
               <Table.Column className="text-foreground font-semibold">L/P</Table.Column>
 
-              {/* Dynamic Task Header Columns */}
-              {mapelTasks.map((task) => (
-                <Table.Column key={task.id} className="text-foreground font-semibold text-center min-w-[85px]">
-                  Tugas {task.id}
-                </Table.Column>
-              ))}
+              {/* Dynamic Task Header Columns: Fleksibel & Dapat Diklik */}
+              {mapelTasks.map((task, idx) => {
+                const displayLabel = task.label || `Tugas ${idx + 1}`
+                const displayTopic = task.topic || task.title
+                return (
+                  <Table.Column key={task.id} className="text-foreground font-semibold text-center min-w-[95px] p-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDetailTask(task)}
+                      className="group w-full flex flex-col items-center justify-center gap-0.5 py-1 px-1.5 rounded-md hover:bg-muted/80 transition-colors cursor-pointer text-center"
+                      title={`Klik untuk info rincian: ${displayLabel} - ${displayTopic}`}
+                    >
+                      <span className="text-xs font-bold text-foreground group-hover:text-[#4274D9] transition-colors truncate max-w-[95px]">
+                        {displayLabel}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground group-hover:text-[#4274D9]/80 flex items-center gap-0.5 font-normal">
+                        <Info className="h-2.5 w-2.5" /> Info
+                      </span>
+                    </button>
+                  </Table.Column>
+                )
+              })}
 
               {/* Summary Columns */}
               <Table.Column className="text-foreground font-semibold text-center">Rata-rata</Table.Column>
@@ -722,7 +800,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               {mapelTasks.length === 0 ? (
                 /* EMPTY STATE (0 Data Kalo Belum Ada Tugas - Tidak Tampilkan Baris Siswa) */
                 <Table.Row>
-                  <Table.Cell colSpan={isSelectionMode ? 7 : 6} className="h-64 text-center py-10">
+                  <Table.Cell colSpan={6} className="h-64 text-center py-10">
                     <div className="flex flex-col items-center justify-center space-y-3 max-w-sm mx-auto">
                       <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
                         <FileSpreadsheet className="h-6 w-6" />
@@ -735,7 +813,10 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => setIsAddTaskOpen(true)}
+                        onClick={() => {
+                          if (!newLabel) setNewLabel(`Tugas ${mapelTasks.length + 1}`)
+                          setIsAddTaskOpen(true)
+                        }}
                         className="h-8 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white gap-1.5 font-medium mt-1 cursor-pointer"
                       >
                         <PlusCircle className="h-3.5 w-3.5" />
@@ -747,7 +828,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               ) : students.length === 0 ? (
                 /* TASK EXISTS BUT NO STUDENTS REGISTERED YET */
                 <Table.Row>
-                  <Table.Cell colSpan={(isSelectionMode ? 7 : 6) + mapelTasks.length} className="h-64 text-center py-10">
+                  <Table.Cell colSpan={6 + mapelTasks.length} className="h-64 text-center py-10">
                     <div className="flex flex-col items-center justify-center space-y-3 max-w-md mx-auto">
                       <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center">
                         <UserPlus className="h-6 w-6" />
@@ -757,24 +838,35 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                           {mapelTasks.length} Tugas {selectedMapel} Terdaftar
                         </p>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          Tugas telah ditambahkan, tetapi belum ada data siswa terdaftar di Kelas <strong className="text-foreground">{kelasCode.toUpperCase()}</strong>. Silakan migrasi data siswa untuk mulai menginput nilai.
+                          Tugas telah ditambahkan, tetapi belum ada data siswa terdaftar di Kelas <strong className="text-foreground">{kelasCode.toUpperCase()}</strong>. Silakan migrasi data siswa untuk mulai menginput nilai, atau kelola daftar tugas di bawah.
                         </p>
                       </div>
-                      <Link href="/migrasi">
+                      <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
+                        <Link href="/migrasi">
+                          <Button
+                            size="sm"
+                            className="h-8 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white gap-1.5 font-medium cursor-pointer"
+                          >
+                            <FileSpreadsheet className="h-3.5 w-3.5" />
+                            <span>Migrasi Data Siswa</span>
+                          </Button>
+                        </Link>
                         <Button
                           size="sm"
-                          className="h-8 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white gap-1.5 font-medium mt-1 cursor-pointer"
+                          variant="outline"
+                          onClick={() => setIsTaskListOpen(true)}
+                          className="h-8 text-xs border-border hover:bg-accent gap-1.5 font-medium cursor-pointer"
                         >
-                          <FileSpreadsheet className="h-3.5 w-3.5" />
-                          <span>Migrasi Data Siswa</span>
+                          <BookOpen className="h-3.5 w-3.5 text-[#4274D9]" />
+                          <span>Kelola / Hapus Tugas ({mapelTasks.length})</span>
                         </Button>
-                      </Link>
+                      </div>
                     </div>
                   </Table.Cell>
                 </Table.Row>
               ) : paginatedStudents.length === 0 ? (
                 <Table.Row>
-                  <Table.Cell colSpan={(isSelectionMode ? 7 : 6) + mapelTasks.length} className="text-center py-8 text-muted-foreground">
+                  <Table.Cell colSpan={6 + mapelTasks.length} className="text-center py-8 text-muted-foreground">
                     Tidak ada data siswa yang cocok dengan pencarian &quot;{searchQuery}&quot;
                   </Table.Cell>
                 </Table.Row>
@@ -784,18 +876,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
                   return (
                     <Table.Row key={student.nisn}>
-                      {isSelectionMode && (
-                        <Table.Cell className="text-center animate-in fade-in">
-                          <div className="flex items-center justify-center">
-                            <Checkbox
-                              checked={selectedNisns.includes(student.nisn)}
-                              onCheckedChange={() => handleToggleSelect(student.nisn)}
-                              aria-label={`Pilih ${student.nama}`}
-                              className="cursor-pointer"
-                            />
-                          </div>
-                        </Table.Cell>
-                      )}
+
                       <Table.Cell>{student.noAbs}</Table.Cell>
                       <Table.Cell className="font-mono">{student.nisn}</Table.Cell>
                       <Table.Cell className="font-medium">{student.nama}</Table.Cell>
@@ -912,9 +993,9 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
       )}
 
       {/* Quick Grade Modal */}
-      <Dialog open={gradeModalTarget !== null} onOpenChange={(open) => { if (!open) setGradeModalTarget(null) }}>
+      <Dialog open={gradeModalTarget !== null} onOpenChange={(open) => { if (!open && !savingRef.current) setGradeModalTarget(null) }}>
         <DialogContent className="sm:max-w-md">
-          <form onSubmit={handleSaveGrade} className="space-y-4">
+          <form onSubmit={handleSaveGrade} className="space-y-4"><fieldset disabled={isSaving} className="space-y-4">
             <DialogHeader>
               <DialogTitle className="text-base font-semibold">
                 Penilaian Tugas: {gradeModalTarget?.task.title}
@@ -983,7 +1064,7 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
                 Simpan Penilaian
               </Button>
             </DialogFooter>
-          </form>
+          </fieldset></form>
         </DialogContent>
       </Dialog>
 
@@ -1079,27 +1160,408 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog Konfirmasi Hapus Beberapa / Semua Data Tagihan Tugas */}
-      <Dialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
+      {/* Dialog Katalog / Daftar Tugas Mapel Tertentu */}
+      <Dialog open={isTaskListOpen} onOpenChange={setIsTaskListOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90dvh] sm:max-h-[85vh] flex flex-col p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle className="text-red-600 dark:text-red-400 flex items-center gap-2">
-              <Trash2 className="h-5 w-5" />
-              <span>Konfirmasi Hapus Data Tagihan Tugas</span>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+              <BookOpen className="h-5 w-5 text-[#4274D9]" />
+              <span>Daftar Tugas {selectedMapel} - Kelas {kelasCode.toUpperCase()}</span>
             </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
-              Apakah Anda yakin ingin menghapus <strong className="text-foreground font-semibold">{selectedNisns.length} data siswa</strong> dari matriks tagihan tugas {selectedMapel} Kelas {kelasCode.toUpperCase()}? Data yang telah dihapus tidak dapat dikembalikan.
+            <DialogDescription className="text-xs">
+              Daftar seluruh tagihan tugas pada mata pelajaran ini. Klik untuk melihat informasi rincian, edit, atau hapus tugas.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0 pt-2">
-            <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs">Batal</Button>} />
+
+          <div className="flex-1 overflow-y-auto py-2 space-y-3 pr-1">
+            {mapelTasks.length === 0 ? (
+              <div className="text-center py-12 space-y-3">
+                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mx-auto text-muted-foreground">
+                  <BookOpen className="h-6 w-6" />
+                </div>
+                <p className="text-xs text-muted-foreground">Belum ada tugas untuk mata pelajaran {selectedMapel}.</p>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setIsTaskListOpen(false)
+                    if (!newLabel) setNewLabel(`Tugas 1`)
+                    setIsAddTaskOpen(true)
+                  }}
+                  className="h-8 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white gap-1.5 cursor-pointer"
+                >
+                  <PlusCircle className="h-3.5 w-3.5" />
+                  <span>Buat Tugas Baru</span>
+                </Button>
+              </div>
+            ) : (
+              mapelTasks.map((task, idx) => {
+                const metrics = calculateTaskMetrics(task.id)
+                const displayLabel = task.label || `Tugas ${idx + 1}`
+                const displayTopic = task.topic || task.title
+
+                return (
+                  <div
+                    key={task.id}
+                    className="p-4 rounded-xl border border-border bg-card hover:border-[#4274D9]/40 hover:shadow-sm transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-[#4274D9]/15 text-[#4274D9]">
+                          {displayLabel}
+                        </span>
+                        <h4 className="font-semibold text-sm text-foreground truncate">
+                          {displayTopic}
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3 text-muted-foreground" />
+                          <span>Deadline: <strong>{task.deadline || "Tidak ditentukan"}</strong></span>
+                        </span>
+
+                        {students.length > 0 && (
+                          <span className="flex items-center gap-2 text-[11px]">
+                            <span className="text-emerald-600 font-medium">
+                              {metrics.dinilaiCount} Dinilai
+                            </span>
+                            <span>•</span>
+                            <span className="text-amber-600 font-medium">
+                              {metrics.kumpulCount} Kumpul
+                            </span>
+                            <span>•</span>
+                            <span className="text-rose-600 font-medium">
+                              {metrics.belumCount} Belum
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setIsTaskListOpen(false)
+                          setSelectedDetailTask(task)
+                        }}
+                        className="h-8 px-2.5 text-xs gap-1.5 border-border hover:bg-accent cursor-pointer"
+                      >
+                        <Info className="h-3.5 w-3.5 text-[#4274D9]" />
+                        <span>Detail Info</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleOpenEditTask(task)}
+                        className="h-8 px-2.5 text-xs gap-1 border-border hover:bg-accent cursor-pointer"
+                        title="Edit Tugas"
+                      >
+                        <Edit className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="hidden sm:inline">Edit</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setTaskToDelete(task)}
+                        className="h-8 px-2.5 text-xs gap-1 border-rose-500/30 text-rose-600 hover:bg-rose-500/10 cursor-pointer"
+                        title="Hapus Tugas"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Hapus</span>
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          <DialogFooter className="mt-3 pt-3 border-t border-border flex flex-row items-center justify-between sm:justify-between w-full">
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!newLabel) setNewLabel(`Tugas ${mapelTasks.length + 1}`)
+                setIsAddTaskOpen(true)
+              }}
+              className="h-8 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white gap-1.5 cursor-pointer"
+            >
+              <PlusCircle className="h-3.5 w-3.5" />
+              <span>Tambah Tugas Baru</span>
+            </Button>
+            <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs px-3">Tutup</Button>} />
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Informasi Lebih Lanjut Tugas */}
+      <Dialog open={selectedDetailTask !== null} onOpenChange={(open) => { if (!open) setSelectedDetailTask(null) }}>
+        <DialogContent className="sm:max-w-xl max-h-[90dvh] sm:max-h-[85vh] flex flex-col p-4 sm:p-6">
+          {selectedDetailTask && (() => {
+            const metrics = calculateTaskMetrics(selectedDetailTask.id)
+            const displayLabel = selectedDetailTask.label || "Tugas"
+            const displayTopic = selectedDetailTask.topic || selectedDetailTask.title
+            const pendingStudents = students.filter((s) => {
+              const g = getGrade(s.nisn, selectedDetailTask.id)
+              return g.status === "BELUM" || g.status === "TERLAMBAT"
+            })
+
+            return (
+              <>
+                <DialogHeader>
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#4274D9]/15 text-[#4274D9]">
+                      {displayLabel}
+                    </span>
+                    <span className="text-xs text-muted-foreground font-medium">
+                      {selectedDetailTask.mapel} • Kelas {kelasCode.toUpperCase()}
+                    </span>
+                  </div>
+                  <DialogTitle className="text-base font-bold text-foreground">
+                    {displayTopic}
+                  </DialogTitle>
+                  <DialogDescription className="text-xs flex items-center gap-1.5 pt-1">
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span>Batas Waktu / Deadline: <strong>{selectedDetailTask.deadline || "Tidak ada batas waktu"}</strong></span>
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1">
+                  {/* Metric Cards Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 flex flex-col">
+                      <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Sudah Dinilai</span>
+                      <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">
+                        {metrics.dinilaiCount}
+                        <span className="text-xs font-normal text-muted-foreground ml-1">
+                          ({metrics.totalStudents > 0 ? Math.round((metrics.dinilaiCount / metrics.totalStudents) * 100) : 0}%)
+                        </span>
+                      </span>
+                    </div>
+
+                    <div className="p-3 rounded-xl border border-amber-500/20 bg-amber-500/5 flex flex-col">
+                      <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Kumpul (Belum Dinilai)</span>
+                      <span className="text-lg font-bold text-amber-700 dark:text-amber-300 mt-0.5">
+                        {metrics.kumpulCount}
+                      </span>
+                    </div>
+
+                    <div className="p-3 rounded-xl border border-sky-500/20 bg-sky-500/5 flex flex-col">
+                      <span className="text-[11px] font-medium text-sky-600 dark:text-sky-400">Terlambat</span>
+                      <span className="text-lg font-bold text-sky-700 dark:text-sky-300 mt-0.5">
+                        {metrics.terlambatCount}
+                      </span>
+                    </div>
+
+                    <div className="p-3 rounded-xl border border-rose-500/20 bg-rose-500/5 flex flex-col">
+                      <span className="text-[11px] font-medium text-rose-600 dark:text-rose-400">Belum Kumpul</span>
+                      <span className="text-lg font-bold text-rose-700 dark:text-rose-300 mt-0.5">
+                        {metrics.belumCount}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Summary Nilai Kelas */}
+                  {metrics.dinilaiCount > 0 && (
+                    <div className="p-3 rounded-xl border border-border bg-muted/30 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Rata-rata Nilai: </span>
+                        <strong className="text-foreground text-sm">{metrics.avgScore?.toFixed(1)}</strong>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Tertinggi: </span>
+                        <strong className="text-foreground">{metrics.maxScore}</strong>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Terendah: </span>
+                        <strong className="text-foreground">{metrics.minScore}</strong>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Section Siswa Belum Selesai / Terlambat */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <AlertCircle className="h-3.5 w-3.5 text-rose-500" />
+                        <span>Siswa Perlu Tindak Lanjut ({pendingStudents.length})</span>
+                      </h5>
+                      <span className="text-[11px] text-muted-foreground">
+                        {students.length > 0 ? `${students.length - pendingStudents.length} dari ${students.length} tuntas kumpul` : "0 siswa"}
+                      </span>
+                    </div>
+
+                    {students.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-2 text-center">
+                        Belum ada siswa terdaftar di kelas ini.
+                      </p>
+                    ) : pendingStudents.length === 0 ? (
+                      <div className="p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-center text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                        🎉 Semua siswa telah mengumpulkan tugas ini!
+                      </div>
+                    ) : (
+                      <div className="border border-border rounded-lg divide-y divide-border/60 max-h-48 overflow-y-auto">
+                        {pendingStudents.map((student) => {
+                          const g = getGrade(student.nisn, selectedDetailTask.id)
+                          return (
+                            <div key={student.nisn} className="p-2 flex items-center justify-between gap-2 text-xs">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-foreground truncate">
+                                  {student.noAbs}. {student.nama}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground font-mono">
+                                  NISN: {student.nisn} {student.kontakOrtu && student.kontakOrtu !== "-" ? `• HP Ortu: ${student.kontakOrtu}` : ""}
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded text-[10px] font-bold",
+                                  g.status === "TERLAMBAT"
+                                    ? "bg-sky-500/15 text-sky-600"
+                                    : "bg-rose-500/15 text-rose-600"
+                                )}>
+                                  {g.status === "TERLAMBAT" ? "Terlambat" : "Belum Kumpul"}
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleOpenGradeModal(student, selectedDetailTask)}
+                                  className="h-7 px-2 text-[11px] border-border hover:bg-accent cursor-pointer"
+                                >
+                                  Beri Nilai
+                                </Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <DialogFooter className="mt-3 pt-3 border-t border-border flex flex-row items-center justify-between sm:justify-between w-full">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleOpenEditTask(selectedDetailTask)}
+                      className="h-8 px-2.5 text-xs gap-1 border-border hover:bg-accent cursor-pointer"
+                    >
+                      <Edit className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span>Edit Tugas</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setTaskToDelete(selectedDetailTask)}
+                      className="h-8 px-2.5 text-xs gap-1 border-rose-500/30 text-rose-600 hover:bg-rose-500/10 cursor-pointer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Hapus</span>
+                    </Button>
+                  </div>
+                  <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs px-3">Tutup</Button>} />
+                </DialogFooter>
+              </>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Edit Tugas */}
+      <Dialog open={editingTask !== null} onOpenChange={(open) => { if (!open && !savingRef.current) setEditingTask(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={handleSaveEditTask} className="space-y-4">
+            <fieldset disabled={isSaving} className="space-y-4">
+              <DialogHeader>
+                <DialogTitle className="text-base font-semibold">
+                  Edit Tagihan Tugas
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Ubah nomor/label, judul, atau tenggat waktu tugas.
+                </DialogDescription>
+              </DialogHeader>
+
+              <FieldGroup className="space-y-3">
+                <Field>
+                  <Label htmlFor="edit-task-label" className="text-xs font-semibold">Nomor / Label Tugas</Label>
+                  <Input
+                    id="edit-task-label"
+                    value={editLabel}
+                    onChange={(e) => setEditLabel(e.target.value)}
+                    placeholder="Contoh: Tugas 1, UH 1, PR 2"
+                    className="h-9 text-xs font-semibold font-mono"
+                    required
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Label yang tampil di header kolom matriks.</p>
+                </Field>
+
+                <Field>
+                  <Label htmlFor="edit-task-title" className="text-xs font-semibold">Judul / Topik Tugas</Label>
+                  <Input
+                    id="edit-task-title"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="Contoh: Operasi Aljabar..."
+                    className="h-9 text-xs"
+                    required
+                  />
+                </Field>
+
+                <Field>
+                  <Label htmlFor="edit-task-deadline" className="text-xs font-semibold">Deadline</Label>
+                  <Input
+                    id="edit-task-deadline"
+                    value={editDeadline}
+                    onChange={(e) => setEditDeadline(e.target.value)}
+                    placeholder="Contoh: 2026-08-30, 23:59 WIB"
+                    className="h-9 text-xs"
+                    required
+                  />
+                </Field>
+              </FieldGroup>
+
+              <DialogFooter className="mt-3">
+                <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs px-3">Batal</Button>} />
+                <Button type="submit" size="sm" className="h-8 text-xs px-3 bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer">
+                  Simpan Perubahan
+                </Button>
+              </DialogFooter>
+            </fieldset>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Konfirmasi Hapus Tugas */}
+      <Dialog open={taskToDelete !== null} onOpenChange={(open) => { if (!open && !savingRef.current) setTaskToDelete(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold text-rose-600">
+              <Trash2 className="h-5 w-5" />
+              <span>Hapus Tagihan Tugas?</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs space-y-2 pt-1 text-foreground block">
+              <span className="block">
+                Apakah Anda yakin ingin menghapus tugas <strong className="font-semibold">{taskToDelete?.label || taskToDelete?.title}</strong>?
+              </span>
+              <span className="block text-rose-600 text-[11px] bg-rose-500/10 p-2 rounded-md">
+                Tindakan ini akan menghapus tugas beserta seluruh data nilai siswa yang terkait secara permanen dari server.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="mt-2">
+            <DialogClose render={<Button variant="outline" size="sm" type="button" className="h-8 text-xs px-3">Batal</Button>} />
             <Button
               type="button"
               size="sm"
-              className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white font-medium cursor-pointer"
-              onClick={handleExecuteBulkDelete}
+              onClick={handleConfirmDeleteTask}
+              disabled={isSaving}
+              className="h-8 text-xs px-3 bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
             >
-              Ya, Hapus {selectedNisns.length} Data
+              Ya, Hapus Tugas
             </Button>
           </DialogFooter>
         </DialogContent>

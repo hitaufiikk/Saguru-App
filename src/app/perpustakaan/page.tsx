@@ -239,7 +239,7 @@ export default function PerpustakaanPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground pt-4 sm:pt-6 pb-20 px-4 sm:px-6 font-sans">
+    <main className="min-h-screen bg-background text-foreground pt-3 sm:pt-6 pb-16 sm:pb-20 px-3 sm:px-6 font-sans">
       <div className="max-w-5xl lg:max-w-6xl mx-auto space-y-6">
         {/* Toast Notification */}
         {toastMessage && (
@@ -259,7 +259,7 @@ export default function PerpustakaanPage() {
         </div>
 
         {/* Header Action Bar: Search Input & Upload Button */}
-        <div className="p-4 rounded-2xl border border-border bg-card shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="p-3 sm:p-4 rounded-2xl border border-border bg-card shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
           {/* Search Input */}
           <div className="relative w-full sm:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -545,9 +545,9 @@ export default function PerpustakaanPage() {
             </DialogHeader>
 
             {/* LIVE PDF VIEWER (PRATINJAU KEMBALI) */}
-            <div className="p-4 bg-muted/20 flex flex-col items-center justify-center min-h-[500px]">
+            <div className="p-4 bg-muted/20 flex flex-col items-center justify-center min-h-[280px] sm:min-h-[420px]">
               {viewingBook?.pdfDataUrl ? (
-                <div className="w-full h-[520px] rounded-xl border border-border overflow-hidden bg-background shadow-xs">
+                <div className="w-full h-[50vh] sm:h-[520px] max-h-[70vh] rounded-xl border border-border overflow-hidden bg-background shadow-xs">
                   <iframe
                     src={`${viewingBook.pdfDataUrl}#toolbar=1&navpanes=0&view=FitH`}
                     className="w-full h-full border-none"

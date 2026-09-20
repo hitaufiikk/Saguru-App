@@ -3,8 +3,11 @@ import { supabase } from "@/lib/supabase"
 export interface TaskRecord {
   id: number
   title: string
+  label?: string
+  topic?: string
   mapel: string
   kelas_code: string
+  deadline?: string
   created_at?: string
 }
 
@@ -15,39 +18,87 @@ export interface GradeRecord {
   kelas_code: string
   score: number | null
   status: string
+  catatan?: string
+}
+
+export function parseTaskTitle(rawTitle: string, fallbackIndex = 1): { label: string; topic: string } {
+  const trimmed = (rawTitle || "").trim()
+  if (!trimmed) {
+    return { label: `Tugas ${fallbackIndex}`, topic: `Tugas ${fallbackIndex}` }
+  }
+
+  // Format standar: [Label] Topik/Deskripsi
+  const bracketMatch = trimmed.match(/^\[(.*?)\]\s*(.*)$/)
+  if (bracketMatch) {
+    const label = bracketMatch[1].trim() || `Tugas ${fallbackIndex}`
+    const topic = bracketMatch[2].trim() || label
+    return { label, topic }
+  }
+
+  // Format umum: "Tugas 1: Topik", "UH 1 - Topik", "PR 2 : Topik"
+  const prefixMatch = trimmed.match(/^((?:Tugas|UH|PR|PTS|PAS|Proyek|Remedial)\s*[\w.-]*)\s*[:\-–]\s*(.*)$/i)
+  if (prefixMatch) {
+    const label = prefixMatch[1].trim()
+    const topic = prefixMatch[2].trim() || label
+    return { label, topic }
+  }
+
+  // Jika input hanya berupa nomor/kode saja seperti "Tugas 1", "UH 2", "PR 1"
+  if (/^(?:Tugas|UH|PR|PTS|PAS|Proyek|Remedial)\s*[\w.-]*$/i.test(trimmed)) {
+    return { label: trimmed, topic: trimmed }
+  }
+
+  // Fallback data legacy
+  return { label: `Tugas ${fallbackIndex}`, topic: trimmed }
+}
+
+export function formatTaskTitle(label: string, topic: string): string {
+  const cleanLabel = (label || "").trim()
+  const cleanTopic = (topic || "").trim()
+  if (!cleanTopic || cleanTopic.toLowerCase() === cleanLabel.toLowerCase()) {
+    return cleanLabel ? `[${cleanLabel}]` : "[Tugas 1]"
+  }
+  return `[${cleanLabel}] ${cleanTopic}`
 }
 
 export const tugasService = {
   // Fetch task catalog for a class
-  async getTasksByClass(kelasCode: string): Promise<TaskRecord[]> {
+  async getTasksByClass(kelasCode: string, client = supabase): Promise<TaskRecord[]> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from("tasks")
         .select("*")
         .eq("kelas_code", kelasCode.toLowerCase())
         .order("created_at", { ascending: true })
 
-      if (error) return []
+      if (error) throw error
 
-      return (data || []).map((t) => ({
-        id: t.id,
-        title: t.title,
-        mapel: t.mapel || "Matematika",
-        kelas_code: t.kelas_code,
-      }))
+      return (data || []).map((t, idx) => {
+        const parsed = parseTaskTitle(t.title, idx + 1)
+        return {
+          id: t.id,
+          title: t.title,
+          label: parsed.label,
+          topic: parsed.topic,
+          mapel: t.mapel || "Matematika",
+          kelas_code: t.kelas_code,
+          deadline: t.deadline || "",
+        }
+      })
     } catch (err) {
-      return []
+      throw err
     }
   },
 
   // Add new task
-  async addTask(title: string, mapel: string, kelasCode: string): Promise<TaskRecord | null> {
+  async addTask(title: string, mapel: string, kelasCode: string, deadline = "", client = supabase): Promise<TaskRecord | null> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from("tasks")
         .insert([
           {
             title: title.trim(),
+            deadline: deadline.trim(),
             mapel: mapel.trim(),
             kelas_code: kelasCode.toLowerCase(),
           },
@@ -55,28 +106,58 @@ export const tugasService = {
         .select()
         .single()
 
-      if (error || !data) return null
+      if (error) throw error
+      if (!data) throw new Error("Server tidak mengembalikan tugas.")
+      const parsed = parseTaskTitle(data.title, 1)
       return {
         id: data.id,
         title: data.title,
+        label: parsed.label,
+        topic: parsed.topic,
         mapel: data.mapel,
         kelas_code: data.kelas_code,
+        deadline: data.deadline || "",
       }
     } catch (err) {
-      return null
+      throw err
+    }
+  },
+
+  // Update existing task (title, deadline, mapel)
+  async updateTask(
+    taskId: number,
+    kelasCode: string,
+    updates: { title?: string; deadline?: string; mapel?: string },
+    client = supabase
+  ): Promise<boolean> {
+    try {
+      const payload: Record<string, string> = {}
+      if (updates.title !== undefined) payload.title = updates.title.trim()
+      if (updates.deadline !== undefined) payload.deadline = updates.deadline.trim()
+      if (updates.mapel !== undefined) payload.mapel = updates.mapel.trim()
+
+      const { error } = await client
+        .from("tasks")
+        .update(payload)
+        .eq("id", taskId)
+        .eq("kelas_code", kelasCode.toLowerCase())
+
+      return !error
+    } catch {
+      return false
     }
   },
 
   // Delete task and its associated grades from Supabase
-  async deleteTask(taskId: number, kelasCode: string): Promise<boolean> {
+  async deleteTask(taskId: number, kelasCode: string, client = supabase): Promise<boolean> {
     try {
-      await supabase
+      await client
         .from("grades")
         .delete()
         .eq("task_id", taskId)
         .eq("kelas_code", kelasCode.toLowerCase())
 
-      const { error } = await supabase
+      const { error } = await client
         .from("tasks")
         .delete()
         .eq("id", taskId)
@@ -89,20 +170,21 @@ export const tugasService = {
   },
 
   // Fetch grades matrix for a class
-  async getGradesByClass(kelasCode: string): Promise<Record<string, { score: number | null; status: string }>> {
+  async getGradesByClass(kelasCode: string, client = supabase): Promise<Record<string, { score: number | null; status: string; catatan: string }>> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from("grades")
-        .select("task_id, nisn, score, status, mapel")
+        .select("task_id, nisn, score, status, mapel, catatan")
         .eq("kelas_code", kelasCode.toLowerCase())
 
-      if (error) return {}
+      if (error) throw error
 
-      const gradeMap: Record<string, { score: number | null; status: string }> = {}
+      const gradeMap: Record<string, { score: number | null; status: string; catatan: string }> = {}
       ;(data || []).forEach((row) => {
         const subject = row.mapel || "Matematika"
         const key = `${row.nisn}_${kelasCode.toLowerCase()}_${subject}_${row.task_id}`
         gradeMap[key] = {
+          catatan: row.catatan || "",
           score: row.score !== null ? Number(row.score) : null,
           status: row.status || "BELUM",
         }
@@ -110,53 +192,23 @@ export const tugasService = {
 
       return gradeMap
     } catch (err) {
-      return {}
+      throw err
     }
   },
 
-  // Save/Update student grade
-  async saveGrade(
-    taskId: number,
-    nisn: string,
-    kelasCode: string,
-    score: number | null,
-    status: string,
-    mapel: string = "Matematika"
-  ): Promise<boolean> {
-    try {
-      const targetMapel = mapel || "Matematika"
-      const targetKelas = kelasCode.toLowerCase()
-
-      // 1. Clear existing record to guarantee conflict-free write
-      await supabase
-        .from("grades")
-        .delete()
-        .eq("task_id", taskId)
-        .eq("nisn", nisn)
-        .eq("kelas_code", targetKelas)
-        .eq("mapel", targetMapel)
-
-      // 2. Insert new grade record
-      const { error } = await supabase.from("grades").insert([
-        {
-          task_id: taskId,
-          nisn,
-          kelas_code: targetKelas,
-          mapel: targetMapel,
-          score,
-          status,
-          updated_at: new Date().toISOString(),
-        },
-      ])
-
-      if (error) {
-        console.warn("Supabase saveGrade warning:", error.message)
-      }
-
-      return !error
-    } catch (err) {
-      return false
+  // One atomic upsert: a failed write never deletes the previous grade.
+  async saveGrade(taskId: number, nisn: string, kelasCode: string,
+    score: number | null, status: string, mapel = "Matematika", catatan = "", client = supabase): Promise<boolean> {
+    if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100)) {
+      throw new Error("Nilai harus antara 0 dan 100.")
     }
+    const { data, error } = await client.from("grades").upsert({
+      task_id: taskId, nisn, kelas_code: kelasCode.toLowerCase(), mapel,
+      score, status, catatan: catatan.trim(), updated_at: new Date().toISOString(),
+    }, { onConflict: "task_id,nisn" }).select("id").single()
+    if (error) throw error
+    if (!data) throw new Error("Nilai tidak tersimpan.")
+    return true
   },
 
   // Exclude / Hide NISN in Tagihan Tugas (Tugas Soft Delete)

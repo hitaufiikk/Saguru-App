@@ -148,7 +148,7 @@ export function NavigationMenuDemo() {
       </div>
 
       {/* 2. Mobile & Tablet Navigation Header */}
-      <div className="flex lg:hidden items-center justify-between w-full">
+      <div className="flex lg:hidden items-center w-full">
         <Button
           variant="ghost"
           size="icon"
@@ -160,7 +160,7 @@ export function NavigationMenuDemo() {
         </Button>
 
         {/* SAGURU Brand Text Centered in Mobile & Tablet */}
-        <div className="flex-1 flex justify-center pr-9">
+        <div className="flex-1 flex justify-center px-2">
           <BrandLink />
         </div>
       </div>

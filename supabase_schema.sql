@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS public.students (
     gender TEXT DEFAULT 'Laki-laki',
     kelas_code TEXT NOT NULL,
     wali_kelas TEXT DEFAULT '-',
+    kontak_ortu TEXT,
     status TEXT DEFAULT 'HADIR',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -92,12 +93,16 @@ CREATE TABLE IF NOT EXISTS public.user_profile (
     avatar_url TEXT DEFAULT 'https://avatars.githubusercontent.com/u/124599?v=4',
     wallpaper_url TEXT DEFAULT 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=800&auto=format&fit=crop',
     pin_code TEXT DEFAULT '123456',
+    mapel TEXT DEFAULT 'Matematika',
+    kelas_ajar TEXT[] DEFAULT ARRAY['8I', '8H', '9A', '9B'],
+    wali_kelas TEXT DEFAULT '9A',
+    tahun_ajaran TEXT DEFAULT '2025/2026',
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Inisialisasi Profil Default
-INSERT INTO public.user_profile (id, name, role_title, pin_code)
-VALUES ('teacher_profile', 'Devy, S.Pd.', 'Wali Kelas 9A • Guru Matematika', '123456')
+INSERT INTO public.user_profile (id, name, role_title, pin_code, mapel, kelas_ajar, wali_kelas, tahun_ajaran)
+VALUES ('teacher_profile', 'Devy, S.Pd.', 'Wali Kelas 9A • Guru Matematika', '123456', 'Matematika', ARRAY['8I', '8H', '9A', '9B'], '9A', '2025/2026')
 ON CONFLICT (id) DO NOTHING;
 
 -- ====================================================================
@@ -132,6 +137,9 @@ CREATE POLICY "Public Access binaan_notes" ON public.binaan_notes FOR ALL USING 
 CREATE POLICY "Public Access exclusions" ON public.exclusions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public Access digital_books" ON public.digital_books FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public Access user_profile" ON public.user_profile FOR ALL USING (true) WITH CHECK (true);
+
+-- Grant permissions for anon, authenticated, and service_role
+GRANT ALL ON TABLE public.students, public.presensi, public.tasks, public.grades, public.binaan_notes, public.exclusions, public.digital_books, public.user_profile TO anon, authenticated, service_role;
 
 -- Enable Realtime for multi-device instant sync
 DO $$

@@ -11,7 +11,7 @@ async function runProductionParserTests() {
   let passed = 0
   let failed = 0
 
-  function assert(condition: boolean, testName: string, detail?: any) {
+  function assert(condition: boolean, testName: string, detail?: unknown) {
     if (condition) {
       console.log(`✅ ${testName}`)
       if (detail) console.log(`   `, detail)
@@ -295,7 +295,7 @@ async function runProductionParserTests() {
   if (failed > 0) process.exit(1)
 }
 
-runProductionParserTests().catch((err) => {
+runProductionParserTests().catch((err: unknown) => {
   console.error("Fatal error:", err)
   process.exit(1)
 })

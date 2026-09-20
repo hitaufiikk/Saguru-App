@@ -172,7 +172,7 @@ export function WelcomeBanner() {
   if (isClosed) return null
 
   return (
-    <div className="w-full max-w-5xl lg:max-w-6xl mx-auto my-6 px-4 sm:px-6">
+    <div className="w-full max-w-5xl lg:max-w-6xl mx-auto my-3 sm:my-6 px-3 sm:px-6">
       <div className="relative overflow-hidden rounded-md border border-border border-t-4 border-t-emerald-600 dark:border-t-emerald-500 bg-card text-card-foreground shadow-xs transition-all duration-200">
         
         {/* Header Bar dengan Judul Tengah & Tombol Aksi Kanan */}
@@ -231,7 +231,7 @@ export function WelcomeBanner() {
 
         {/* Isi Konten Dalam Bentuk Carousel Landscape dengan Loop Tak Terbatas */}
         {!isMinimized && (
-          <div className="relative px-8 py-5 sm:px-12 sm:py-6">
+          <div className="relative px-7 sm:px-12 py-3 sm:py-6">
             <Carousel opts={{ loop: true }} className="w-full">
               <CarouselContent>
                 {/* Slide 1: Informasi Periode Akademik & Tanggal Realtime */}

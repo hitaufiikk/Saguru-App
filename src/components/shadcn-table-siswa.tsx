@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Edit3, Trash2, Search, UserPlus, Download, FileText, FileSpreadsheet, Users, UserX } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -36,11 +36,12 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 import {
-  exportToExcel,
-  exportToPDF,
+  exportDataSiswaToExcel,
+  exportDataSiswaToPDF,
   getFormattedCurrentDate,
   getFormattedCurrentDateTime,
 } from "@/lib/export-utils"
+import { createLatestRequest } from "@/lib/latest-request"
 import { studentService } from "@/lib/services/studentService"
 
 export interface StudentItem {
@@ -71,22 +72,12 @@ const DEFAULT_9A_STUDENTS: StudentItem[] = [
 
 export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
   const router = useRouter()
-  const [students, setStudents] = useState<StudentItem[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem("saguru_migrated_students")
-        if (stored) {
-          const map = JSON.parse(stored)
-          if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
-            return map[kelasCode?.toLowerCase()]
-          }
-        }
-      } catch (err) {
-        console.error("Error reading localStorage:", err)
-      }
-    }
-    return []
-  })
+  const requests = useRef(createLatestRequest())
+  const deletedLocally = useRef(new Set<string>())
+  const deletingRef = useRef(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isSavingStudent, setIsSavingStudent] = useState(false)
+  const [students, setStudents] = useState<StudentItem[]>([])
 
   const [searchQuery, setSearchQuery] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
@@ -114,36 +105,54 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
 
   // Multi-select & Bulk Delete State
   const [isSelectionMode, setIsSelectionMode] = useState(false)
-  const [selectedNisns, setSelectedNisns] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem(storageKey)
-        if (stored) return JSON.parse(stored)
-      } catch (err) {}
-    }
-    return []
-  })
+
+
+
+  const [selectedNisns, setSelectedNisns] = useState<string[]>([])
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false)
+  const [isExportOpen, setIsExportOpen] = useState(false)
+  const [exportFormat, setExportFormat] = useState<"pdf" | "excel">("pdf")
+  const [exportWaliKelas, setExportWaliKelas] = useState("Devy, S.Pd.")
+
+  const [exportTanggal, setExportTanggal] = useState<string>("")
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   // Load selection and fetch from Supabase + localStorage when kelasCode changes
   useEffect(() => {
     let isMounted = true
 
-    try {
-      const stored = localStorage.getItem(storageKey)
-      if (stored) {
-        setSelectedNisns(JSON.parse(stored))
-      } else {
-        setSelectedNisns([])
-      }
-    } catch (err) {
-      setSelectedNisns([])
-    }
+    // 2. Muat cache siswa secara instan agar UI tidak kosong sambil menunggu request Supabase
+
 
     const loadData = async () => {
+      if (deletingRef.current) return
+      const isCurrent = requests.current.begin()
+      try {
+        const stored = localStorage.getItem("saguru_migrated_students")
+        if (stored) {
+          const map = JSON.parse(stored)
+          const cached = map[kelasCode?.toLowerCase()]
+          if (Array.isArray(cached) && cached.length > 0 && isMounted && isCurrent()) {
+            setStudents(cached.filter((s: StudentItem) => !deletedLocally.current.has(s.nisn)))
+          }
+        }
+      } catch (e) { }
+
+      try {
+        const storedSelection = localStorage.getItem(storageKey)
+        if (storedSelection) {
+          setSelectedNisns(JSON.parse(storedSelection))
+        }
+        const storedDate = localStorage.getItem(`saguru_presensi_date_${kelasCode.toLowerCase()}`)
+        setExportTanggal(storedDate || getFormattedCurrentDate())
+      } catch {
+        setExportTanggal(getFormattedCurrentDate())
+      }
+
       try {
         const dbData = await studentService.getStudentsByClass(kelasCode)
-        if (isMounted && dbData && dbData.length > 0) {
+        if (!isMounted || !isCurrent()) return
+        if (dbData) {
           const formatted: StudentItem[] = dbData.map((s, index) => ({
             noAbs: s.noAbs || index + 1,
             nisn: s.nisn,
@@ -152,29 +161,31 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
             kontakOrtu: s.kontak_ortu || "-",
           }))
           setStudents(formatted)
+          setSelectedNisns((selected) => selected.filter((id) => formatted.some((s) => s.nisn === id)))
 
           try {
             const stored = localStorage.getItem("saguru_migrated_students")
             const map = stored ? JSON.parse(stored) : {}
             map[kelasCode.toLowerCase()] = formatted
             localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
-          } catch (e) {}
+          } catch (e) { }
           return
         }
       } catch (err) {
         console.warn("Supabase fetch student fallback:", err)
       }
 
-      // Fallback to local storage
+
+      // Fallback only when the server request failed
       try {
         const stored = localStorage.getItem("saguru_migrated_students")
         if (stored) {
           const map = JSON.parse(stored)
           if (map[kelasCode?.toLowerCase()] && Array.isArray(map[kelasCode?.toLowerCase()])) {
-            if (isMounted) setStudents(map[kelasCode?.toLowerCase()])
+            if (isMounted) setStudents(map[kelasCode?.toLowerCase()].filter((s: StudentItem) => !deletedLocally.current.has(s.nisn)))
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     loadData()
@@ -186,6 +197,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
 
     return () => {
       isMounted = false
+      requests.current.invalidate()
       window.removeEventListener("saguru-data-updated", handleDataUpdated)
     }
   }, [kelasCode, storageKey])
@@ -194,7 +206,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
     setSelectedNisns(newSelected)
     try {
       localStorage.setItem(storageKey, JSON.stringify(newSelected))
-    } catch (err) {}
+    } catch (err) { }
   }
 
   const filteredStudents = students.filter(
@@ -220,83 +232,104 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
     saveSelectedNisns(next)
   }
 
-  const handleExecuteBulkDelete = () => {
-    const updated = students.filter((s) => !selectedNisns.includes(s.nisn))
-    setStudents(updated)
-
+  const executeDelete = async (nisns: string[]) => {
+    if (deletingRef.current || !nisns.length) return
+    deletingRef.current = true
+    setIsDeleting(true)
+    requests.current.invalidate()
     try {
-      const stored = localStorage.getItem("saguru_migrated_students")
-      const map = stored ? JSON.parse(stored) : {}
-      map[kelasCode.toLowerCase()] = updated
-      localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
-      localStorage.removeItem(storageKey)
+      const result = await studentService.deleteStudents(nisns, kelasCode)
+      if (result.deletedNisns.length) {
+        requests.current.invalidate()
+        const deleted = new Set(result.deletedNisns)
+        result.deletedNisns.forEach((id) => deletedLocally.current.add(id))
+        setStudents((previous) => previous.filter((s) => !deleted.has(s.nisn)))
+        try {
+          const stored = localStorage.getItem("saguru_migrated_students")
+          const map = stored ? JSON.parse(stored) : {}
+          map[kelasCode.toLowerCase()] = (map[kelasCode.toLowerCase()] || [])
+            .filter((s: StudentItem) => !deleted.has(s.nisn))
+          localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
+        } catch {
+          alert("Siswa sudah terhapus di server, tetapi cache perangkat gagal diperbarui. Sambungkan internet saat membuka daftar kembali.")
+        }
+        saveSelectedNisns(selectedNisns.filter((id) => !deleted.has(id)))
+      }
+      if (result.error) {
+        alert(`Penghapusan belum selesai: ${result.error}`)
+      } else {
+        setDeletingStudent(null)
+        setIsBulkDeleteOpen(false)
+        setIsSelectionMode(false)
+      }
+    } finally {
+      deletingRef.current = false
+      setIsDeleting(false)
       window.dispatchEvent(new Event("saguru-data-updated"))
-    } catch (err) {}
-
-    saveSelectedNisns([])
-    setIsBulkDeleteOpen(false)
-    setIsSelectionMode(false)
+    }
   }
 
+  const handleExecuteBulkDelete = () => executeDelete(
+    selectedNisns.filter((id) => students.some((s) => s.nisn === id))
+  )
+
   // Export State
-  const [isExportOpen, setIsExportOpen] = useState(false)
-  const [exportFormat, setExportFormat] = useState<"pdf" | "excel">("pdf")
-  const [exportWaliKelas, setExportWaliKelas] = useState("Devy, S.Pd.")
+
   const [exportKelas, setExportKelas] = useState(`Kelas ${kelasCode.toUpperCase()}`)
   const [exportTahun, setExportTahun] = useState("2026/2027")
-  const [exportTanggal, setExportTanggal] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      const storedDate = localStorage.getItem(`saguru_presensi_date_${kelasCode.toLowerCase()}`)
-      if (storedDate) return storedDate
-    }
-    return getFormattedCurrentDate()
-  })
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
+
 
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / itemsPerPage))
   const safeCurrentPage = Math.min(currentPage, totalPages)
   const startIndex = (safeCurrentPage - 1) * itemsPerPage
   const paginatedStudents = filteredStudents.slice(startIndex, startIndex + itemsPerPage)
 
+  const cacheSavedStudents = (updated: StudentItem[]) => {
+    setStudents(updated)
+    try {
+      const map = JSON.parse(localStorage.getItem("saguru_migrated_students") || "{}")
+      map[kelasCode.toLowerCase()] = updated
+      localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
+    } catch {
+      alert("Data tersimpan di server, tetapi cache perangkat gagal diperbarui.")
+    }
+  }
+
   const handleAddSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!addNama.trim() || !addNisn.trim()) return
-
-    const nextNoAbs = students.length > 0 ? Math.max(...students.map((s) => s.noAbs)) + 1 : 1
+    if (deletingRef.current || !addNama.trim() || !addNisn.trim()) return
+    deletingRef.current = true
+    setIsSavingStudent(true)
+    requests.current.invalidate()
     const newStudent: StudentItem = {
-      noAbs: nextNoAbs,
+      noAbs: students.length + 1,
       nisn: addNisn.trim(),
       nama: addNama.trim(),
       gender: addGender === "cowok" ? "Laki-laki" : "Perempuan",
-      kontakOrtu: addKontak.trim() ? addKontak.trim() : "-",
+      kontakOrtu: addKontak.trim() || "-",
     }
-
-    const updated = [...students, newStudent]
-    setStudents(updated)
-
+    let saved = false
     try {
-      const stored = localStorage.getItem("saguru_migrated_students")
-      const map = stored ? JSON.parse(stored) : {}
-      map[kelasCode.toLowerCase()] = updated
-      localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
-      window.dispatchEvent(new Event("saguru-data-updated"))
-    } catch (err) {}
-
-    // Async sync to Supabase
-    studentService.addStudent({
-      nisn: newStudent.nisn,
-      nama: newStudent.nama,
-      gender: newStudent.gender,
-      kelas_code: kelasCode.toLowerCase(),
-      wali_kelas: kelasCode.toLowerCase() === "9a" ? "Devy, S.Pd." : "-",
-      kontak_ortu: newStudent.kontakOrtu,
-    }).catch((err) => console.warn("Supabase addStudent sync error:", err))
-
-    setAddNama("")
-    setAddNisn("")
-    setAddGender("cowok")
-    setAddKontak("")
-    setIsAddOpen(false)
+      saved = await studentService.addStudent({
+        nisn: newStudent.nisn, nama: newStudent.nama, gender: newStudent.gender,
+        kelas_code: kelasCode.toLowerCase(),
+        wali_kelas: kelasCode.toLowerCase() === "9a" ? "Devy, S.Pd." : "-",
+        kontak_ortu: newStudent.kontakOrtu,
+      })
+      if (!saved) throw new Error("Siswa gagal disimpan. Periksa koneksi, identitas duplikat, dan pastikan migrasi kolom kontak_ortu sudah dijalankan.")
+      cacheSavedStudents([...students, newStudent])
+      setAddNama("")
+      setAddNisn("")
+      setAddGender("cowok")
+      setAddKontak("")
+      setIsAddOpen(false)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Siswa gagal disimpan.")
+    } finally {
+      deletingRef.current = false
+      setIsSavingStudent(false)
+      if (saved) window.dispatchEvent(new Event("saguru-data-updated"))
+    }
   }
 
   const handleOpenEdit = (student: StudentItem) => {
@@ -304,64 +337,40 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
     setEditNama(student.nama)
     setEditNisn(student.nisn)
     setEditGender(student.gender === "Laki-laki" ? "cowok" : "cewek")
-    setEditKontak(student.kontakOrtu || "-")
+    setEditKontak(student.kontakOrtu === "-" ? "" : student.kontakOrtu || "")
   }
 
   const handleSaveEdit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!editingStudent || !editNama.trim() || !editNisn.trim()) return
-
-    const updated = students.map((s) =>
-      s.nisn === editingStudent.nisn
-        ? {
-            ...s,
-            nisn: editNisn.trim(),
-            nama: editNama.trim(),
-            gender: editGender === "cowok" ? "Laki-laki" : "Perempuan",
-            kontakOrtu: editKontak.trim() ? editKontak.trim() : "-",
-          }
-        : s
-    )
-    setStudents(updated)
-
-    try {
-      const stored = localStorage.getItem("saguru_migrated_students")
-      const map = stored ? JSON.parse(stored) : {}
-      map[kelasCode.toLowerCase()] = updated
-      localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
-      window.dispatchEvent(new Event("saguru-data-updated"))
-    } catch (err) {}
-
-    // Async sync to Supabase
-    studentService.updateStudent(editingStudent.nisn, {
-      nama: editNama.trim(),
-      nisn: editNisn.trim(),
+    if (deletingRef.current || !editingStudent || !editNama.trim() || !editNisn.trim()) return
+    deletingRef.current = true
+    setIsSavingStudent(true)
+    requests.current.invalidate()
+    const changes = {
+      nisn: editNisn.trim(), nama: editNama.trim(),
       gender: editGender === "cowok" ? "Laki-laki" : "Perempuan",
-    }).catch((err) => console.warn("Supabase updateStudent sync error:", err))
-
-    setEditingStudent(null)
+      kontakOrtu: editKontak.trim() || "-",
+    }
+    let saved = false
+    try {
+      saved = await studentService.updateStudent(editingStudent.nisn, {
+        nisn: changes.nisn, nama: changes.nama, gender: changes.gender,
+        kontak_ortu: changes.kontakOrtu,
+      })
+      cacheSavedStudents(students.map((s) => s.nisn === editingStudent.nisn ? { ...s, ...changes } : s))
+      setEditingStudent(null)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Perubahan gagal disimpan.")
+    } finally {
+      deletingRef.current = false
+      setIsSavingStudent(false)
+      if (saved) window.dispatchEvent(new Event("saguru-data-updated"))
+    }
   }
 
   const handleConfirmDelete = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!deletingStudent) return
-
-    const targetNisn = deletingStudent.nisn
-    const updated = students.filter((s) => s.nisn !== targetNisn)
-    setStudents(updated)
-
-    try {
-      const stored = localStorage.getItem("saguru_migrated_students")
-      const map = stored ? JSON.parse(stored) : {}
-      map[kelasCode.toLowerCase()] = updated
-      localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
-      window.dispatchEvent(new Event("saguru-data-updated"))
-    } catch (err) {}
-
-    // Async sync to Supabase
-    studentService.deleteStudent(targetNisn).catch((err) => console.warn("Supabase deleteStudent sync error:", err))
-
-    setDeletingStudent(null)
+    if (deletingStudent) await executeDelete([deletingStudent.nisn])
   }
 
   const handleExportSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -373,21 +382,20 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
 
     try {
       if (exportFormat === "excel") {
-        await exportToExcel({
+        await exportDataSiswaToExcel({
           students,
           kelas: exportKelas,
           tahun: exportTahun,
           waliKelas: exportWaliKelas,
-          tanggal: exportTanggal,
           tanggalExport: currentExportTime,
         })
       } else {
-        exportToPDF({
+        exportDataSiswaToPDF({
           students,
           kelas: exportKelas,
           tahun: exportTahun,
           waliKelas: exportWaliKelas,
-          tanggal: exportTanggal,
+
           tanggalExport: currentExportTime,
         })
       }
@@ -402,9 +410,9 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
   return (
     <div className="space-y-4">
       {/* Action Bar: Search & Buttons */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         {/* Search Input */}
-        <div className="relative w-72 sm:w-80">
+        <div className="relative w-full sm:max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             type="search"
@@ -414,14 +422,14 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               setSearchQuery(e.target.value)
               setCurrentPage(1)
             }}
-            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border"
+            className="pl-9 h-9 text-xs sm:text-sm bg-background border-border w-full"
           />
         </div>
 
         {/* Right Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end">
           {/* Popover Tambah Siswa */}
-          <Popover open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <Popover open={isAddOpen} onOpenChange={(open) => { if (!isSavingStudent) setIsAddOpen(open) }}>
             <PopoverTrigger render={
               <Button size="sm" className="h-9 px-3 text-xs sm:text-sm gap-1.5 bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer font-medium">
                 <UserPlus className="h-4 w-4" />
@@ -430,63 +438,65 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
             } />
             <PopoverContent className="w-80 p-4 shadow-xl">
               <form onSubmit={handleAddSubmit} className="space-y-3">
-                <div className="space-y-1">
-                  <h4 className="font-semibold text-sm leading-none text-foreground">Tambah Siswa Baru</h4>
-                  <p className="text-xs text-muted-foreground">Isi data profil siswa kelas {kelasCode.toUpperCase()}</p>
-                </div>
-                <FieldGroup className="space-y-2.5">
-                  <Field>
-                    <Label htmlFor="add-nama-heroui-matching" className="text-xs font-semibold">Nama Lengkap</Label>
-                    <Input
-                      id="add-nama-heroui-matching"
-                      value={addNama}
-                      onChange={(e) => setAddNama(e.target.value)}
-                      placeholder="Nama Siswa"
-                      className="h-8 text-xs"
-                      required
-                    />
-                  </Field>
-                  <Field>
-                    <Label htmlFor="add-nisn-heroui-matching" className="text-xs font-semibold">NISN</Label>
-                    <Input
-                      id="add-nisn-heroui-matching"
-                      value={addNisn}
-                      onChange={(e) => setAddNisn(e.target.value)}
-                      placeholder="00812345xx"
-                      className="h-8 text-xs font-mono"
-                      required
-                    />
-                  </Field>
-                  <Field>
-                    <Label htmlFor="add-kontak-heroui-matching" className="text-xs font-semibold">
-                      Kontak Ortu <span className="text-muted-foreground font-normal">(opsional)</span>
-                    </Label>
-                    <Input
-                      id="add-kontak-heroui-matching"
-                      value={addKontak}
-                      onChange={(e) => setAddKontak(e.target.value)}
-                      placeholder="e.g. 0812-3456-7890"
-                      className="h-8 text-xs"
-                    />
-                  </Field>
-                  <Field>
-                    <Label className="text-xs font-semibold">Jenis Kelamin</Label>
-                    <RadioGroup value={addGender} onValueChange={setAddGender} className="flex items-center gap-4 mt-1">
-                      <div className="flex items-center gap-1.5 cursor-pointer">
-                        <RadioGroupItem value="cowok" id="add-r-cowok-heroui-matching" />
-                        <Label htmlFor="add-r-cowok-heroui-matching" className="text-xs font-medium cursor-pointer">Laki-laki</Label>
-                      </div>
-                      <div className="flex items-center gap-1.5 cursor-pointer">
-                        <RadioGroupItem value="cewek" id="add-r-cewek-heroui-matching" />
-                        <Label htmlFor="add-r-cewek-heroui-matching" className="text-xs font-medium cursor-pointer">Perempuan</Label>
-                      </div>
-                    </RadioGroup>
-                  </Field>
-                </FieldGroup>
-                <div className="flex justify-end gap-2 pt-1">
-                  <PopoverClose render={<Button variant="outline" size="sm" type="button" className="h-7 text-xs">Batal</Button>} />
-                  <Button type="submit" size="sm" className="h-7 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white">Simpan</Button>
-                </div>
+                <fieldset disabled={isSavingStudent} className="contents">
+                  <div className="space-y-1">
+                    <h4 className="font-semibold text-sm leading-none text-foreground">Tambah Siswa Baru</h4>
+                    <p className="text-xs text-muted-foreground">Isi data profil siswa kelas {kelasCode.toUpperCase()}</p>
+                  </div>
+                  <FieldGroup className="space-y-2.5">
+                    <Field>
+                      <Label htmlFor="add-nama-heroui-matching" className="text-xs font-semibold">Nama Lengkap</Label>
+                      <Input
+                        id="add-nama-heroui-matching"
+                        value={addNama}
+                        onChange={(e) => setAddNama(e.target.value)}
+                        placeholder="Nama Siswa"
+                        className="h-8 text-xs"
+                        required
+                      />
+                    </Field>
+                    <Field>
+                      <Label htmlFor="add-nisn-heroui-matching" className="text-xs font-semibold">NISN</Label>
+                      <Input
+                        id="add-nisn-heroui-matching"
+                        value={addNisn}
+                        onChange={(e) => setAddNisn(e.target.value)}
+                        placeholder="00812345xx"
+                        className="h-8 text-xs font-mono"
+                        required
+                      />
+                    </Field>
+                    <Field>
+                      <Label htmlFor="add-kontak-heroui-matching" className="text-xs font-semibold">
+                        Kontak Ortu <span className="text-muted-foreground font-normal">(opsional)</span>
+                      </Label>
+                      <Input
+                        id="add-kontak-heroui-matching"
+                        value={addKontak}
+                        onChange={(e) => setAddKontak(e.target.value)}
+                        placeholder="e.g. 0812-3456-7890"
+                        className="h-8 text-xs"
+                      />
+                    </Field>
+                    <Field>
+                      <Label className="text-xs font-semibold">Jenis Kelamin</Label>
+                      <RadioGroup value={addGender} onValueChange={setAddGender} className="flex items-center gap-4 mt-1">
+                        <div className="flex items-center gap-1.5 cursor-pointer">
+                          <RadioGroupItem value="cowok" id="add-r-cowok-heroui-matching" />
+                          <Label htmlFor="add-r-cowok-heroui-matching" className="text-xs font-medium cursor-pointer">Laki-laki</Label>
+                        </div>
+                        <div className="flex items-center gap-1.5 cursor-pointer">
+                          <RadioGroupItem value="cewek" id="add-r-cewek-heroui-matching" />
+                          <Label htmlFor="add-r-cewek-heroui-matching" className="text-xs font-medium cursor-pointer">Perempuan</Label>
+                        </div>
+                      </RadioGroup>
+                    </Field>
+                  </FieldGroup>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <PopoverClose render={<Button variant="outline" size="sm" type="button" className="h-7 text-xs">Batal</Button>} />
+                    <Button type="submit" size="sm" className="h-7 text-xs bg-[#4274D9] hover:bg-[#3561bd] text-white">Simpan</Button>
+                  </div>
+                </fieldset>
               </form>
             </PopoverContent>
           </Popover>
@@ -506,7 +516,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               size="sm"
               className="h-9 px-3 text-xs sm:text-sm gap-1.5 border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer font-medium"
               onClick={() => setIsSelectionMode(true)}
-              disabled={students.length === 0}
+              disabled={isDeleting || isSavingStudent || students.length === 0}
             >
               <Trash2 className="h-4 w-4" />
               <span>Hapus Data</span>
@@ -516,7 +526,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               <Button
                 variant="destructive"
                 size="sm"
-                disabled={selectedNisns.length === 0}
+                disabled={isDeleting || isSavingStudent || selectedNisns.length === 0}
                 className="h-9 px-3 text-xs sm:text-sm gap-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer font-medium"
                 onClick={() => setIsBulkDeleteOpen(true)}
               >
@@ -542,7 +552,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
             variant="outline"
             className="h-9 px-3 text-xs sm:text-sm gap-2 cursor-pointer border-border hover:bg-accent"
             onClick={() => setIsExportOpen(true)}
-            disabled={students.length === 0}
+            disabled={isDeleting || isSavingStudent || students.length === 0}
           >
             <Download className="h-4 w-4" />
             <span>Export</span>
@@ -643,6 +653,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
                           type="button"
                           className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
                           title="Hapus Data Siswa"
+                          disabled={isDeleting}
                           onClick={() => setDeletingStudent(student)}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -798,83 +809,85 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       </Dialog>
 
       {/* Dialog Edit Data Siswa */}
-      <Dialog open={editingStudent !== null} onOpenChange={(open) => { if (!open) setEditingStudent(null) }}>
+      <Dialog open={editingStudent !== null} onOpenChange={(open) => { if (!open && !isSavingStudent) setEditingStudent(null) }}>
         <DialogContent className="sm:max-w-sm">
           <form onSubmit={handleSaveEdit}>
-            <DialogHeader>
-              <DialogTitle>Edit data siswa</DialogTitle>
-              <DialogDescription>
-                Ubah data profil siswa kelas {kelasCode.toUpperCase()}
-              </DialogDescription>
-            </DialogHeader>
-            <FieldGroup className="py-2 space-y-3">
-              <Field>
-                <Label htmlFor="edit-name-heroui-match">Nama Lengkap</Label>
-                <Input
-                  id="edit-name-heroui-match"
-                  value={editNama}
-                  onChange={(e) => setEditNama(e.target.value)}
-                  required
-                />
-              </Field>
-              <Field>
-                <Label htmlFor="edit-nisn-heroui-match">NISN</Label>
-                <Input
-                  id="edit-nisn-heroui-match"
-                  value={editNisn}
-                  onChange={(e) => setEditNisn(e.target.value)}
-                  required
-                />
-              </Field>
-              <Field>
-                <Label htmlFor="edit-kontak-heroui-match">
-                  Kontak Ortu <span className="text-muted-foreground font-normal">(opsional)</span>
-                </Label>
-                <Input
-                  id="edit-kontak-heroui-match"
-                  value={editKontak}
-                  onChange={(e) => setEditKontak(e.target.value)}
-                  placeholder="Kosongkan jika tidak ada (-)"
-                />
-              </Field>
-              <Field>
-                <Label className="text-sm font-medium text-foreground">Jenis Kelamin</Label>
-                <RadioGroup value={editGender} onValueChange={setEditGender} className="flex items-center gap-6 mt-1">
-                  <div className="flex items-center gap-2 cursor-pointer">
-                    <RadioGroupItem value="cowok" id="edit-r-cowok-heroui-match" />
-                    <Label htmlFor="edit-r-cowok-heroui-match" className="text-sm font-medium cursor-pointer">Laki-laki</Label>
-                  </div>
-                  <div className="flex items-center gap-2 cursor-pointer">
-                    <RadioGroupItem value="cewek" id="edit-r-cewek-heroui-match" />
-                    <Label htmlFor="edit-r-cewek-heroui-match" className="text-sm font-medium cursor-pointer">Perempuan</Label>
-                  </div>
-                </RadioGroup>
-              </Field>
-            </FieldGroup>
-            <DialogFooter className="mt-4">
-              <DialogClose render={<Button variant="outline" type="button">Batal</Button>} />
-              <Button type="submit" className="bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer">
-                Simpan Perubahan
-              </Button>
-            </DialogFooter>
+            <fieldset disabled={isSavingStudent} className="contents">
+              <DialogHeader>
+                <DialogTitle>Edit data siswa</DialogTitle>
+                <DialogDescription>
+                  Ubah data profil siswa kelas {kelasCode.toUpperCase()}
+                </DialogDescription>
+              </DialogHeader>
+              <FieldGroup className="py-2 space-y-3">
+                <Field>
+                  <Label htmlFor="edit-name-heroui-match">Nama Lengkap</Label>
+                  <Input
+                    id="edit-name-heroui-match"
+                    value={editNama}
+                    onChange={(e) => setEditNama(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field>
+                  <Label htmlFor="edit-nisn-heroui-match">NISN</Label>
+                  <Input
+                    id="edit-nisn-heroui-match"
+                    value={editNisn}
+                    onChange={(e) => setEditNisn(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field>
+                  <Label htmlFor="edit-kontak-heroui-match">
+                    Kontak Ortu <span className="text-muted-foreground font-normal">(opsional)</span>
+                  </Label>
+                  <Input
+                    id="edit-kontak-heroui-match"
+                    value={editKontak}
+                    onChange={(e) => setEditKontak(e.target.value)}
+                    placeholder="Kosongkan jika tidak ada (-)"
+                  />
+                </Field>
+                <Field>
+                  <Label className="text-sm font-medium text-foreground">Jenis Kelamin</Label>
+                  <RadioGroup value={editGender} onValueChange={setEditGender} className="flex items-center gap-6 mt-1">
+                    <div className="flex items-center gap-2 cursor-pointer">
+                      <RadioGroupItem value="cowok" id="edit-r-cowok-heroui-match" />
+                      <Label htmlFor="edit-r-cowok-heroui-match" className="text-sm font-medium cursor-pointer">Laki-laki</Label>
+                    </div>
+                    <div className="flex items-center gap-2 cursor-pointer">
+                      <RadioGroupItem value="cewek" id="edit-r-cewek-heroui-match" />
+                      <Label htmlFor="edit-r-cewek-heroui-match" className="text-sm font-medium cursor-pointer">Perempuan</Label>
+                    </div>
+                  </RadioGroup>
+                </Field>
+              </FieldGroup>
+              <DialogFooter className="mt-4">
+                <DialogClose render={<Button variant="outline" type="button">Batal</Button>} />
+                <Button disabled={isSavingStudent} type="submit" className="bg-[#4274D9] hover:bg-[#3561bd] text-white cursor-pointer">
+                  {isSavingStudent ? "Menyimpan…" : "Simpan Perubahan"}
+                </Button>
+              </DialogFooter>
+            </fieldset>
           </form>
         </DialogContent>
       </Dialog>
 
       {/* Dialog Hapus Data Siswa (Single) */}
-      <Dialog open={deletingStudent !== null} onOpenChange={(open) => { if (!open) setDeletingStudent(null) }}>
+      <Dialog open={deletingStudent !== null} onOpenChange={(open) => { if (!open && !isDeleting) setDeletingStudent(null) }}>
         <DialogContent className="sm:max-w-sm">
           <form onSubmit={handleConfirmDelete}>
             <DialogHeader>
               <DialogTitle>Hapus data siswa</DialogTitle>
               <DialogDescription>
-                Apakah Anda yakin ingin menghapus data <strong>{deletingStudent?.nama}</strong> ({deletingStudent?.nisn})?
+                Apakah Anda yakin ingin menghapus data <strong>{deletingStudent?.nama}</strong> ({deletingStudent?.nisn}) dari Kelas {kelasCode.toUpperCase()}? Riwayat presensi siswa ini juga akan terhapus permanen.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="mt-4">
               <DialogClose render={<Button variant="outline" type="button">Batal</Button>} />
-              <Button type="submit" variant="destructive" className="bg-red-600 hover:bg-red-700 text-white cursor-pointer">
-                Hapus
+              <Button disabled={isDeleting} type="submit" variant="destructive" className="bg-red-600 hover:bg-red-700 text-white cursor-pointer">
+                {isDeleting ? "Menghapus…" : "Hapus"}
               </Button>
             </DialogFooter>
           </form>
@@ -882,7 +895,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
       </Dialog>
 
       {/* Dialog Konfirmasi Hapus Beberapa / Semua Data Siswa */}
-      <Dialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>
+      <Dialog open={isBulkDeleteOpen} onOpenChange={(open) => { if (!isDeleting) setIsBulkDeleteOpen(open) }}>
         <DialogContent className="sm:max-w-md bg-card border-border">
           <DialogHeader>
             <DialogTitle className="text-red-600 dark:text-red-400 flex items-center gap-2">
@@ -890,7 +903,7 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               <span>Konfirmasi Hapus Data Siswa</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
-              Apakah Anda yakin ingin menghapus <strong className="text-foreground font-semibold">{selectedNisns.length} data siswa</strong> yang dipilih untuk Kelas {kelasCode.toUpperCase()}? Data yang telah dihapus tidak dapat dikembalikan.
+              Apakah Anda yakin ingin menghapus <strong className="text-foreground font-semibold">{selectedNisns.length} data siswa</strong> yang dipilih untuk Kelas {kelasCode.toUpperCase()}? Riwayat presensi terkait juga akan terhapus permanen. Data tidak dapat dikembalikan.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0 pt-2">
@@ -899,9 +912,10 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
               type="button"
               size="sm"
               className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white font-medium cursor-pointer"
+              disabled={isDeleting}
               onClick={handleExecuteBulkDelete}
             >
-              Ya, Hapus {selectedNisns.length} Data
+              {isDeleting ? "Menghapus…" : `Ya, Hapus ${selectedNisns.length} Data`}
             </Button>
           </DialogFooter>
         </DialogContent>
