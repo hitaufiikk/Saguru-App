@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Table } from "@heroui/react";
-import { Edit3, Search, UserPlus, Download, FileText, FileSpreadsheet } from "lucide-react";
+import { Edit3, Search, UserPlus, Download, FileText, FileSpreadsheet, RotateCcw, Loader2, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button"
 
@@ -22,7 +22,7 @@ import {
   PopoverContent,
   PopoverClose,
 } from "@/components/ui/popover"
-import { Field, FieldGroup } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -335,6 +335,82 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
     setIsExportOpen(true)
   }
 
+  // State Dialog Reset Presensi
+  const [isResetOpen, setIsResetOpen] = useState(false)
+  const [resetDate, setResetDate] = useState("")
+  const [isResetting, setIsResetting] = useState(false)
+
+  const handleOpenReset = () => {
+    setResetDate(selectedDate || schoolDate())
+    setIsResetOpen(true)
+  }
+
+  const handleExecuteReset = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!resetDate || isResetting) return
+    setIsResetting(true)
+    try {
+      let dbDeletedCount = 0
+
+      try {
+        const res = await presensiService.resetPresensi(kelasCode, resetDate, false)
+        if (res.success) {
+          dbDeletedCount = res.count ?? 0
+        } else if (res.error) {
+          console.warn("Reset Supabase notice:", res.error)
+        }
+      } catch (dbErr: unknown) {
+        console.warn("Reset Supabase notice:", dbErr)
+      }
+
+      // Jika tanggal yang direset adalah tanggal yang sedang dilihat, perbarui status tabel seketika
+      if (resetDate === selectedDate) {
+        setStudents((prev) =>
+          prev.map((s) => ({
+            ...s,
+            status: "BELUM_DICATAT",
+            alasanDispen: "",
+          }))
+        )
+      }
+
+      // Jika tanggal yang direset adalah hari ini, sinkronkan juga cache lokal
+      if (resetDate === schoolDate()) {
+        try {
+          const stored = localStorage.getItem("saguru_migrated_students")
+          if (stored) {
+            const map = JSON.parse(stored)
+            const kc = kelasCode.toLowerCase()
+            if (map[kc]) {
+              map[kc] = map[kc].map((st: StudentItem) => ({
+                ...st,
+                status: "BELUM_DICATAT",
+                alasanDispen: "",
+              }))
+            }
+            localStorage.setItem("saguru_migrated_students", JSON.stringify(map))
+          }
+        } catch {}
+      }
+
+      // Broadcast update event agar Banner & Statistik dashboard ikut tersinkronisasi
+      window.dispatchEvent(new Event("saguru-data-updated"))
+
+      if (dbDeletedCount > 0) {
+        setToastMessage(`Presensi kelas ${kelasCode.toUpperCase()} tanggal ${resetDate} berhasil direset (${dbDeletedCount} data dibersihkan).`)
+      } else {
+        setToastMessage(`Presensi kelas ${kelasCode.toUpperCase()} tanggal ${resetDate} berhasil direset.`)
+      }
+      setTimeout(() => setToastMessage(null), 3000)
+      setIsResetOpen(false)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      alert(`Terjadi kesalahan saat mereset: ${msg}`)
+    } finally {
+      setIsResetting(false)
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / itemsPerPage))
   const safeCurrentPage = Math.min(currentPage, totalPages)
   const startIndex = (safeCurrentPage - 1) * itemsPerPage
@@ -536,8 +612,17 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
           />
         </div>
 
-        {/* Export */}
+        {/* Reset Presensi & Export */}
         <div className="flex items-center gap-2 justify-end">
+          <Button
+            variant="outline"
+            className="h-9 px-3 text-xs sm:text-sm gap-2 cursor-pointer border-border hover:bg-muted text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:border-rose-500/50"
+            disabled={!ready || Boolean(savingNisn) || isResetting}
+            onClick={handleOpenReset}
+          >
+            <RotateCcw className="h-4 w-4" />
+            <span>Reset Presensi</span>
+          </Button>
           <Button
             variant="outline"
             className="h-9 px-3 text-xs sm:text-sm gap-2 cursor-pointer border-border hover:bg-accent"
@@ -1069,11 +1154,66 @@ export function Basic({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
         </DialogContent>
       </Dialog>
 
-      {/* Toast Notification */}
+      {/* Dialog Reset Presensi Sederhana */}
+      <Dialog open={isResetOpen} onOpenChange={setIsResetOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <form onSubmit={handleExecuteReset} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+                <RotateCcw className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+                <span>Reset Presensi</span>
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Pilih tanggal presensi yang ingin direset ke status Belum Dicatat.
+              </DialogDescription>
+            </DialogHeader>
+
+            <FieldGroup className="py-1">
+              <Field>
+                <FieldLabel htmlFor="reset-presensi-date" className="text-xs font-medium text-foreground">
+                  Tanggal
+                </FieldLabel>
+                <Input
+                  id="reset-presensi-date"
+                  type="date"
+                  value={resetDate}
+                  onChange={(e) => setResetDate(e.target.value)}
+                  max={schoolDate()}
+                  className="h-9 text-xs"
+                  required
+                />
+              </Field>
+            </FieldGroup>
+
+            <DialogFooter className="pt-2">
+              <DialogClose
+                render={
+                  <Button variant="outline" size="sm" type="button" disabled={isResetting} className="h-8 text-xs">
+                    Batal
+                  </Button>
+                }
+              />
+              <Button
+                type="submit"
+                size="sm"
+                disabled={isResetting || !resetDate}
+                className="h-8 text-xs gap-1.5 bg-rose-600 hover:bg-rose-700 text-white cursor-pointer font-medium"
+              >
+                {isResetting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                <span>{isResetting ? "Mereset..." : "Reset Presensi"}</span>
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Notifikasi Berhasil di Tengah Layar */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-card p-4 text-xs font-medium text-emerald-600 dark:text-emerald-400 shadow-xl ring-1 ring-foreground/10 animate-in fade-in slide-in-from-bottom-4">
-          <Download className="h-4 w-4 shrink-0 text-emerald-500" />
-          <span>{toastMessage}</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none animate-in fade-in duration-200">
+          <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-card/95 backdrop-blur-md px-6 py-4 text-xs sm:text-sm font-medium text-emerald-700 dark:text-emerald-300 shadow-2xl ring-1 ring-black/5 dark:ring-white/10 animate-in zoom-in-95 duration-200 max-w-md text-center">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span className="leading-snug">{toastMessage}</span>
+          </div>
         </div>
       )}
     </div>

@@ -144,4 +144,41 @@ export const presensiService = {
       return {}
     }
   },
+
+  // Reset attendance records for a class on a specific date (or optionally across all classes)
+  async resetPresensi(
+    kelasCode: string,
+    tanggal: string,
+    resetAllClasses = false,
+    client = supabase
+  ): Promise<{ success: boolean; count?: number; error?: string }> {
+    try {
+      if (!tanggal) {
+        return { success: false, error: "Tanggal presensi tidak valid." }
+      }
+
+      let query = client.from("presensi").delete({ count: "exact" }).eq("tanggal_presensi", tanggal)
+
+      if (!resetAllClasses) {
+        const targetKelas = (kelasCode || "").toLowerCase().trim()
+        if (!targetKelas) {
+          return { success: false, error: "Kode kelas target tidak valid." }
+        }
+        query = query.eq("kelas_code", targetKelas)
+      }
+
+      const { count, error } = await query
+
+      if (error) {
+        console.error("Supabase reset presensi error:", error.message)
+        return { success: false, error: `Gagal mereset presensi: ${error.message}` }
+      }
+
+      return { success: true, count: count ?? 0 }
+    } catch (err) {
+      console.error("Kesalahan tak terduga saat reset presensi:", err)
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, error: `Terjadi kesalahan: ${message}` }
+    }
+  },
 }

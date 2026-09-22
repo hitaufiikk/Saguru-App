@@ -42,42 +42,39 @@ export function generateProfileSubtext(params: {
 
 export const profileService = {
   // Fetch profile from Supabase
-  async getProfile(): Promise<UserProfileRecord | null> {
-    try {
-      const { data, error } = await supabase
-        .from("user_profile")
-        .select("*")
-        .eq("id", "teacher_profile")
-        .maybeSingle()
+  async getProfile(client = supabase): Promise<UserProfileRecord | null> {
+    const { data, error } = await client
+      .from("user_profile")
+      .select("id,name,role_title,avatar_url,wallpaper_url,mapel,kelas_ajar,wali_kelas,tahun_ajaran")
+      .eq("id", "teacher_profile")
+      .maybeSingle()
 
-      if (error || !data) return null
+    if (error) throw new Error(error.message)
+    if (!data) return null
 
-      const mapel = data.mapel || DEFAULT_MAPEL
-      const waliKelas = data.wali_kelas !== undefined && data.wali_kelas !== null ? data.wali_kelas : DEFAULT_WALI_KELAS
-      const kelasAjar = Array.isArray(data.kelas_ajar) && data.kelas_ajar.length > 0 ? data.kelas_ajar : DEFAULT_KELAS_AJAR
-      const tahunAjaran = data.tahun_ajaran || DEFAULT_TAHUN_AJARAN
+    const mapel = data.mapel || DEFAULT_MAPEL
+    const waliKelas = data.wali_kelas !== undefined && data.wali_kelas !== null ? data.wali_kelas : DEFAULT_WALI_KELAS
+    const kelasAjar = Array.isArray(data.kelas_ajar) ? data.kelas_ajar : DEFAULT_KELAS_AJAR
+    const tahunAjaran = data.tahun_ajaran || DEFAULT_TAHUN_AJARAN
 
-      return {
-        id: data.id,
-        name: data.name || DEFAULT_NAME,
-        roleTitle: data.role_title || generateProfileSubtext({ mapel, waliKelas, kelasAjar }),
-        avatarUrl: data.avatar_url || DEFAULT_AVATAR,
-        wallpaperUrl: data.wallpaper_url || DEFAULT_WALLPAPER,
-        mapel,
-        kelasAjar,
-        waliKelas,
-        tahunAjaran,
-      }
-    } catch (err) {
-      return null
+    return {
+      id: data.id,
+      name: data.name || DEFAULT_NAME,
+      roleTitle: data.role_title || generateProfileSubtext({ mapel, waliKelas, kelasAjar }),
+      avatarUrl: data.avatar_url || DEFAULT_AVATAR,
+      wallpaperUrl: data.wallpaper_url || DEFAULT_WALLPAPER,
+      mapel,
+      kelasAjar,
+      waliKelas,
+      tahunAjaran,
     }
   },
 
-  // Save/Upsert profile to Supabase with non-destructive fallback
-  async saveProfile(profile: Partial<UserProfileRecord>): Promise<{ success: boolean; error?: string }> {
+  // Save all fields together; never retry with an incomplete payload.
+  async saveProfile(profile: Partial<UserProfileRecord>, client = supabase): Promise<{ success: boolean; error?: string }> {
     try {
       // Get existing profile to merge non-provided fields
-      const existing = await this.getProfile()
+      const existing = await this.getProfile(client)
 
       const name = profile.name ?? existing?.name ?? DEFAULT_NAME
       const mapel = profile.mapel ?? existing?.mapel ?? DEFAULT_MAPEL
@@ -88,7 +85,7 @@ export const profileService = {
       const avatarUrl = profile.avatarUrl ?? existing?.avatarUrl ?? DEFAULT_AVATAR
       const wallpaperUrl = profile.wallpaperUrl ?? existing?.wallpaperUrl ?? DEFAULT_WALLPAPER
 
-      const payload: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         id: "teacher_profile",
         name,
         role_title: roleTitle,
@@ -101,38 +98,17 @@ export const profileService = {
         updated_at: new Date().toISOString(),
       }
 
-      const { error } = await supabase
+      const { data, error } = await client
         .from("user_profile")
         .upsert([payload], { onConflict: "id" })
+        .select("id")
+        .single()
 
       if (error) {
-        // Fallback if database migration hasn't added new columns yet
-        const isMissingColumnError =
-          error.message &&
-          (error.message.includes("column") ||
-            error.message.includes("schema cache") ||
-            error.message.includes("does not exist") ||
-            (error as any).code === "PGRST204")
-
-        if (isMissingColumnError) {
-          const fallbackPayload = {
-            id: "teacher_profile",
-            name,
-            role_title: roleTitle,
-            avatar_url: avatarUrl,
-            wallpaper_url: wallpaperUrl,
-            updated_at: new Date().toISOString(),
-          }
-          const { error: fallbackErr } = await supabase
-            .from("user_profile")
-            .upsert([fallbackPayload], { onConflict: "id" })
-
-          if (fallbackErr) {
-            return { success: false, error: fallbackErr.message }
-          }
-          return { success: true }
-        }
         return { success: false, error: error.message }
+      }
+      if (data?.id !== "teacher_profile") {
+        return { success: false, error: "Server belum mengonfirmasi penyimpanan profil. Silakan coba lagi." }
       }
 
       return { success: true }

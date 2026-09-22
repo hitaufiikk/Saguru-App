@@ -16,8 +16,13 @@ SET
   tahun_ajaran = COALESCE(tahun_ajaran, '2025/2026')
 WHERE id = 'teacher_profile';
 
--- Ensure table permissions and RLS policies for application access
-GRANT ALL ON TABLE public.user_profile TO anon, authenticated, service_role;
+-- Keep profile access restricted to the provisioned teacher.
 ALTER TABLE public.user_profile ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.user_profile FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_profile TO authenticated;
 DROP POLICY IF EXISTS "Public Access user_profile" ON public.user_profile;
-CREATE POLICY "Public Access user_profile" ON public.user_profile FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS teacher_access_only ON public.user_profile;
+CREATE POLICY teacher_access_only ON public.user_profile FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.teacher_access WHERE user_id = (SELECT auth.uid())))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.teacher_access WHERE user_id = (SELECT auth.uid())));
+NOTIFY pgrst, 'reload schema';

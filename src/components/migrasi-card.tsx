@@ -1,7 +1,9 @@
 "use client"
 
-import { useState, useRef, useMemo } from "react"
+import { useState, useRef, useMemo, useEffect, useCallback, useSyncExternalStore } from "react"
 import Link from "next/link"
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
+import { faFilePdf } from "@fortawesome/free-solid-svg-icons"
 import {
   parseSpreadsheetData,
   ParsedStudentRow,
@@ -10,18 +12,30 @@ import {
   mergeStudentsCache,
   CachedStudentItem,
 } from "@/lib/import-utils"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { studentService } from "@/lib/services/studentService"
+import { profileService, type UserProfileRecord } from "@/lib/services/profileService"
+import { getBannerTimeInfo } from "@/lib/school-date"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuGroup, DropdownMenuLabel,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem,
+} from "@/components/ui/dropdown-menu"
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
-  FieldSet,
-  FieldLegend,
 } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -40,10 +54,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
+  ChevronDown,
   CheckCircle2,
   FileSpreadsheet,
   FileText,
-  FileUp,
   ArrowRight,
   Loader2,
   UserCheck,
@@ -51,34 +65,96 @@ import {
   EyeOff,
   Info,
   AlertTriangle,
+  X,
 } from "lucide-react"
 
+const emptySubscribe = () => () => { }
+
+function useIsMounted() {
+  return useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  )
+}
+
 export function MigrasiDataForm() {
-  const [waliKelas, setWaliKelas] = useState("Devy, S.Pd.")
-  const [tahunSemester, setTahunSemester] = useState("genap-2026")
-  const [jenisPenugasan, setJenisPenugasan] = useState("wali")
+  const isMounted = useIsMounted()
   const [pilihKelas, setPilihKelas] = useState("9a")
 
-  // Generate Academic Year options automatically (starting 2026/2027 for 6 years)
-  const tahunSemesterOptions = useMemo(() => {
-    const options: { value: string; label: string }[] = []
-    const startYear = 2026
-    for (let i = 0; i < 6; i++) {
-      const y1 = startYear + i
-      const y2 = y1 + 1
-      const labelPrefix = `${y1}/${y2}`
-      options.push({
-        value: `ganjil-${y1}`,
-        label: `${labelPrefix} - Semester Ganjil`,
-      })
-      options.push({
-        value: `genap-${y1}`,
-        label: `${labelPrefix} - Semester Genap`,
-      })
+  // Pilihan periode hanya untuk tampilan; belum menjadi atribut penyimpanan siswa.
+  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null)
+  const academicPeriods = useMemo(() => {
+    if (!isMounted) return null
+    const info = getBannerTimeInfo(new Date())
+    const yearLabel = info.tahunAjaran.replace("Tahun Ajaran ", "")
+    const startYear = Number(yearLabel.split("/")[0])
+    return {
+      current: `${info.semester.replace("Semester ", "")} · ${yearLabel}`,
+      options: [startYear - 1, startYear, startYear + 1].flatMap((year) =>
+        ["Ganjil", "Genap"].map((semester) => `${semester} · ${year}/${year + 1}`)
+      ),
     }
-    return options
+  }, [isMounted])
+
+  // Profil guru sebenarnya dari profileService (tanpa fallback 9A)
+  const [teacherProfile, setTeacherProfile] = useState<UserProfileRecord | null>(null)
+  const [isProfileLoading, setIsProfileLoading] = useState(true)
+  const [profileError, setProfileError] = useState<string | null>(null)
+  const [profileReloadKey, setProfileReloadKey] = useState(0)
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadProfile = async () => {
+      try {
+        const p = await profileService.getProfile()
+        if (!isMounted) return
+        setTeacherProfile(p)
+        setProfileError(null)
+      } catch (err) {
+        if (!isMounted) return
+        console.warn("Gagal memuat profil guru:", err)
+        setProfileError("Gagal memuat profil guru.")
+      } finally {
+        if (isMounted) {
+          setIsProfileLoading(false)
+        }
+      }
+    }
+
+    void loadProfile()
+
+    return () => {
+      isMounted = false
+    }
+  }, [profileReloadKey])
+
+  const handleRetryProfile = useCallback(() => {
+    setIsProfileLoading(true)
+    setProfileError(null)
+    setProfileReloadKey((k) => k + 1)
   }, [])
-  
+
+  // Penugasan otomatis mengikuti kelas tujuan dan profil sebenarnya
+  const cleanSelectedClass = (pilihKelas || "").trim().toUpperCase()
+  const teacherWaliKelas = (teacherProfile?.waliKelas || "").trim().toUpperCase()
+  // Nilai kosong berarti TIDAK memiliki kelas perwalian, bukan otomatis 9A
+  const hasWaliAssignment = Boolean(teacherWaliKelas && teacherWaliKelas !== "-" && teacherWaliKelas !== "NONE")
+  const isWaliKelasForSelected = Boolean(hasWaliAssignment && cleanSelectedClass === teacherWaliKelas)
+
+  const penugasanLabel = isProfileLoading
+    ? "Memuat penugasan..."
+    : profileError
+      ? "Gagal memuat profil"
+      : isWaliKelasForSelected
+        ? "Wali Kelas"
+        : "Guru Mapel"
+
+  const resolvedWaliKelas = isWaliKelasForSelected
+    ? (teacherProfile?.name || "-")
+    : "-"
+
   // Empty initial state until file upload
   const [fileName, setFileName] = useState<string>("")
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false)
@@ -102,7 +178,6 @@ export function MigrasiDataForm() {
     total: number
     rejectedCount: number
     skippedCount: number
-    tahun: string
     cacheFailed?: boolean
     cacheErrorMessage?: string
   } | null>(null)
@@ -263,6 +338,17 @@ export function MigrasiDataForm() {
     // Penjagaan submit ganda
     if (isSaving) return
 
+    // Jangan menyimpan memakai penugasan tebakan jika profil masih dimuat atau gagal
+    if (isProfileLoading) {
+      alert("Profil guru sedang dimuat. Mohon tunggu sebentar sebelum menyimpan data.")
+      return
+    }
+
+    if (profileError || !teacherProfile) {
+      alert("Profil guru belum berhasil dimuat. Silakan muat ulang sebelum menyimpan data.")
+      return
+    }
+
     if (!fileName || parsedData.length === 0) {
       alert("Silakan unggah berkas .pdf atau .xlsx yang memiliki data siswa terlebih dahulu!")
       return
@@ -276,8 +362,8 @@ export function MigrasiDataForm() {
     if (validation.validStudents.length === 0) {
       alert(
         "Tidak ada siswa dengan identitas valid yang dapat disimpan. " +
-          `Ditemukan ${validation.rejectionReasonsSummary.emptyIdentity} siswa tanpa identitas dan ` +
-          `${validation.rejectionReasonsSummary.duplicateIdentity} siswa dengan identitas duplikat.`
+        `Ditemukan ${validation.rejectionReasonsSummary.emptyIdentity} siswa tanpa identitas dan ` +
+        `${validation.rejectionReasonsSummary.duplicateIdentity} siswa dengan identitas duplikat.`
       )
       return
     }
@@ -289,7 +375,7 @@ export function MigrasiDataForm() {
       const saveResult = await studentService.saveMigratedStudents(
         validation.validStudents,
         classCode,
-        waliKelas
+        resolvedWaliKelas
       )
 
       if (!saveResult.success) {
@@ -318,26 +404,18 @@ export function MigrasiDataForm() {
       if (cacheFailed) {
         alert(
           "PERHATIAN: Data siswa telah BERHASIL disimpan ke database server Supabase. " +
-            `Namun, sinkronisasi cache lokal peramban gagal (${cacheErrorMessage}). ` +
-            "Data Anda aman di server dan akan disinkronkan saat membuka tabel siswa."
+          `Namun, sinkronisasi cache lokal peramban gagal (${cacheErrorMessage}). ` +
+          "Data Anda aman di server dan akan disinkronkan saat membuka tabel siswa."
         )
       }
 
-      const currentTahunOption = tahunSemesterOptions.find(
-        (opt: { value: string; label: string }) => opt.value === tahunSemester
-      )
-      const selectedTahunLabel = currentTahunOption
-        ? currentTahunOption.label
-        : "2026/2027 - Semester Genap"
-
       setSubmittedInfo({
         fileName,
-        wali: waliKelas,
+        wali: resolvedWaliKelas,
         kelas: targetClassName,
         total: validation.totalValid,
         rejectedCount: validation.totalRejected,
         skippedCount: skippedRows.length,
-        tahun: selectedTahunLabel,
         cacheFailed,
         cacheErrorMessage,
       })
@@ -364,137 +442,205 @@ export function MigrasiDataForm() {
 
   return (
     <div className="w-full">
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN: FORM INPUT */}
-        <div className="lg:col-span-5 p-4 sm:p-6 rounded-2xl border border-border bg-card shadow-md flex flex-col justify-between space-y-5">
-          <FieldSet className="space-y-4">
-            <div className="space-y-1">
-              <FieldLegend className="text-base font-bold text-foreground">Migrasi Data Siswa</FieldLegend>
-              <FieldDescription className="text-xs text-muted-foreground">
-                Upload berkas .pdf, .xlsx, atau .csv berisi data siswa (Nama, NISN, dan Jenis Kelamin).
-              </FieldDescription>
-            </div>
+        <Card className="lg:col-span-5 border-border bg-card shadow-sm p-0 overflow-hidden">
+          <CardHeader className="p-5 pb-4">
+            <CardTitle className="text-base font-bold text-foreground">
+              Impor Data Siswa
+            </CardTitle>
+            <CardDescription className="text-xs text-muted-foreground">
+              Unggah berkas untuk mendaftarkan data siswa ke dalam kelas tujuan.
+            </CardDescription>
+          </CardHeader>
 
+          <CardContent className="p-5 pt-0 space-y-4">
             <FieldGroup className="space-y-4">
-              {/* Field 1: Upload File PDF / Excel */}
-              <Field className="space-y-1">
-                <FieldLabel htmlFor="migrasi-file-input" className="text-xs font-semibold text-foreground">
-                  Pilih Berkas PDF / Excel (.pdf, .xlsx, .csv)
+              {/* Field 1: Pilih Kelas Tujuan */}
+              <Field className="space-y-1.5">
+                <FieldLabel htmlFor="migrasi-kelas" className="text-xs font-semibold text-foreground">
+                  Pilih Kelas Tujuan
                 </FieldLabel>
-                <Input
-                  id="migrasi-file-input"
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf, .xlsx, .xls, .csv, application/pdf"
-                  onChange={handleFileChange}
-                  disabled={isSaving || isLoadingFile}
-                  className="cursor-pointer text-xs h-9 bg-background file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#4274D9]/10 file:text-[#4274D9] disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-              </Field>
-
-              {/* Field 2: Tahun Ajaran & Semester */}
-              <Field className="space-y-1">
-                <FieldLabel htmlFor="migrasi-tahun-semester" className="text-xs font-semibold text-foreground">
-                  Tahun Ajaran &amp; Semester
-                </FieldLabel>
-                <Select value={tahunSemester} onValueChange={(val) => { if (val) setTahunSemester(val) }} disabled={isSaving}>
-                  <SelectTrigger id="migrasi-tahun-semester" className="h-9 text-xs bg-background disabled:opacity-50 disabled:cursor-not-allowed">
-                    <SelectValue placeholder="Pilih Semester" />
+                <Select
+                  value={pilihKelas}
+                  disabled={isSaving}
+                  onValueChange={(val) => {
+                    if (val) setPilihKelas(val)
+                  }}
+                >
+                  <SelectTrigger
+                    id="migrasi-kelas"
+                    className="h-9 text-xs bg-background font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <SelectValue placeholder="Pilih Kelas" />
                   </SelectTrigger>
                   <SelectContent>
-                    {tahunSemesterOptions.map((opt: { value: string; label: string }) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="9a">9A</SelectItem>
+                    <SelectItem value="9b">9B</SelectItem>
+                    <SelectItem value="8h">8H</SelectItem>
+                    <SelectItem value="8i">8I</SelectItem>
                   </SelectContent>
                 </Select>
-                <FieldDescription className="text-[11px] text-muted-foreground pt-0.5">
-                  Data siswa akan otomatis dihubungkan ke periode akademik aktif.
+                <FieldDescription className="text-[11px] text-muted-foreground">
+                  Pilihan kelas utama. Penugasan guru akan otomatis mengikuti kelas yang dipilih.
                 </FieldDescription>
               </Field>
 
-              {/* Grid 3 Columns: Jenis Penugasan, Pilih Kelas, Format Kolom */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <Field className="space-y-1">
-                  <FieldLabel htmlFor="migrasi-jenis" className="text-xs font-semibold text-foreground">
-                    Jenis Penugasan
+              {/* Field 2: Informasi Periode Akademik & Penugasan Guru */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Info Periode Otomatis */}
+                <Field className="space-y-1.5">
+                  <FieldLabel htmlFor="migrasi-periode" className="text-xs font-semibold text-foreground">
+                    Tahun Ajaran &amp; Semester
                   </FieldLabel>
-                  <Select
-                    value={jenisPenugasan}
-                    disabled={isSaving}
-                    onValueChange={(val) => {
-                      if (!val) return
-                      setJenisPenugasan(val)
-                      if (val === "binaan") {
-                        setWaliKelas("-")
-                        if (pilihKelas.toLowerCase() === "9a") {
-                          setPilihKelas("9b")
-                        }
-                      } else {
-                        setPilihKelas("9a")
-                        setWaliKelas("Devy, S.Pd.")
-                      }
-                    }}
-                  >
-                    <SelectTrigger id="migrasi-jenis" className="h-9 text-xs bg-background disabled:opacity-50 disabled:cursor-not-allowed">
-                      <SelectValue placeholder="Jenis" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="wali">wali</SelectItem>
-                      <SelectItem value="binaan">binaan</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      disabled={isSaving || isLoadingFile || !academicPeriods}
+                      render={<Button id="migrasi-periode" type="button" variant="outline" className="h-9 w-full min-w-0 justify-between gap-2 text-xs font-medium" />}
+                    >
+                      <span className="truncate">{selectedPeriod ?? academicPeriods?.current ?? "Memuat periode…"}</span>
+                      <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel>Pilih periode akademik</DropdownMenuLabel>
+                        <DropdownMenuRadioGroup value={selectedPeriod ?? academicPeriods?.current ?? ""} onValueChange={(value) => setSelectedPeriod(value)}>
+                          {academicPeriods?.options.map((period) => (
+                            <DropdownMenuRadioItem key={period} value={period} className="text-xs">{period}</DropdownMenuRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </Field>
 
-                <Field className="space-y-1">
-                  <FieldLabel htmlFor="migrasi-kelas" className="text-xs font-semibold text-foreground">
-                    Pilih Kelas
+                {/* Info Penugasan Guru Otomatis */}
+                <Field className="space-y-1.5">
+                  <FieldLabel className="text-xs font-semibold text-foreground">
+                    Penugasan Guru
                   </FieldLabel>
-                  <Select
-                    value={pilihKelas}
-                    disabled={isSaving}
-                    onValueChange={(val) => {
-                      if (!val) return
-                      setPilihKelas(val)
-                      if (val.toLowerCase() === "9a") {
-                        setJenisPenugasan("wali")
-                        setWaliKelas("Devy, S.Pd.")
-                      } else {
-                        setJenisPenugasan("binaan")
-                        setWaliKelas("-")
-                      }
-                    }}
-                  >
-                    <SelectTrigger id="migrasi-kelas" className="h-9 text-xs bg-background font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
-                      <SelectValue placeholder="Kelas" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="9a">9a</SelectItem>
-                      <SelectItem value="9b">9b</SelectItem>
-                      <SelectItem value="8h">8h</SelectItem>
-                      <SelectItem value="8i">8i</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-
-                <Field className="space-y-1">
-                  <FieldLabel className="text-xs font-semibold text-foreground">Format Data</FieldLabel>
-                  <div className="h-9 px-2 rounded-md bg-muted/60 border border-border flex items-center text-[11px] font-mono text-muted-foreground truncate">
-                    Nama, NISN, L/P
+                  <div className="h-9 px-3 rounded-md bg-muted/50 border border-border flex items-center justify-between text-xs">
+                    {isProfileLoading ? (
+                      <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                        <Loader2 className="h-3 w-3 animate-spin text-[#4274D9]" />
+                        <span>Memuat profil...</span>
+                      </span>
+                    ) : profileError ? (
+                      <div className="flex items-center justify-between w-full text-rose-500 text-[11px]">
+                        <span className="truncate">Gagal memuat</span>
+                        <button
+                          type="button"
+                          onClick={handleRetryProfile}
+                          className="underline hover:text-rose-600 cursor-pointer font-medium ml-1"
+                        >
+                          Coba lagi
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 truncate">
+                        <Badge variant="secondary">
+                          {penugasanLabel}
+                        </Badge>
+                        <span className="truncate text-foreground font-medium text-xs" title={teacherProfile?.name}>
+                          {teacherProfile?.name || "-"}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </Field>
               </div>
-            </FieldGroup>
-          </FieldSet>
 
-          {/* Submit Button */}
-          <div className="pt-2">
+              {/* Field 3: Pilih Berkas */}
+              <Field className="space-y-1.5">
+                <FieldLabel htmlFor="migrasi-file-input" className="text-xs font-semibold text-foreground">
+                  Pilih Berkas
+                </FieldLabel>
+                <FieldDescription className="text-[11px] text-muted-foreground">
+                  {isProfileLoading
+                    ? "Menyesuaikan dengan profil guru..."
+                    : profileError
+                      ? "Profil gagal dimuat."
+                      : isWaliKelasForSelected
+                        ? `Kelas perwalian: ${cleanSelectedClass}`
+                        : `Guru mapel: Kelas ${cleanSelectedClass}`}
+                </FieldDescription>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="migrasi-file-input"
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx, .xls, .csv, .pdf, application/pdf"
+                    onChange={handleFileChange}
+                    disabled={isSaving || isLoadingFile}
+                    className="hidden"
+                  />
+                  <Button
+                    type="button"
+                    disabled={isSaving || isLoadingFile}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-9 px-4 rounded-lg text-xs font-medium bg-muted/60 dark:bg-[#161c28] hover:bg-muted dark:hover:bg-[#1f2737] border border-border dark:border-[#2b3548] text-foreground hover:border-[#4274D9]/60 hover:text-[#4274D9] cursor-pointer transition-colors shadow-2xs shrink-0"
+                  >
+                    {isLoadingFile ? (
+                      <span className="flex items-center gap-1.5">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-[#4274D9]" />
+                        <span>Memproses...</span>
+                      </span>
+                    ) : (
+                      "Browse File"
+                    )}
+                  </Button>
+                  {fileName ? (
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className="text-xs font-mono text-foreground truncate max-w-[190px] sm:max-w-[220px] px-2 py-1 rounded bg-muted/50 border border-border flex items-center gap-1.5"
+                        title={fileName}
+                      >
+                        {isPdf ? (
+                          <FileText className="h-3.5 w-3.5 text-[#4274D9] shrink-0" />
+                        ) : (
+                          <FileSpreadsheet className="h-3.5 w-3.5 text-[#4274D9] shrink-0" />
+                        )}
+                        <span className="truncate">{fileName}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFileName("")
+                          setParsedData([])
+                          setTotalRows(0)
+                          setSkippedRows([])
+                          if (fileInputRef.current) fileInputRef.current.value = ""
+                        }}
+                        disabled={isSaving || isLoadingFile}
+                        className="text-muted-foreground hover:text-rose-500 p-1 rounded-md transition-colors cursor-pointer text-xs shrink-0"
+                        title="Hapus berkas terpilih"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground truncate">
+                      Belum ada berkas dipilih
+                    </span>
+                  )}
+                </div>
+                <FieldDescription className="text-[11px] text-muted-foreground">
+                  Kolom berkas: Nama, NIS/NISN, dan Jenis kelamin. Format berkas: Excel (.xlsx, .xls), CSV (.csv), atau PDF (.pdf).
+                </FieldDescription>
+              </Field>
+            </FieldGroup>
+          </CardContent>
+
+          {/* CardFooter: Submit Button (tanpa mt-auto) */}
+          <CardFooter className="p-5 pt-3 border-t border-border">
             <Button
               type="submit"
               disabled={
                 isSaving ||
                 isLoadingFile ||
+                isProfileLoading ||
+                Boolean(profileError) ||
+                !teacherProfile ||
                 !fileName ||
                 parsedData.length === 0 ||
                 validationResult.validStudents.length === 0
@@ -511,15 +657,20 @@ export function MigrasiDataForm() {
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>Memproses Berkas...</span>
                 </>
+              ) : isProfileLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Memuat Profil Guru...</span>
+                </>
               ) : (
                 <>
                   <CheckCircle2 className="h-4 w-4" />
-                  <span>Proses &amp; Simpan Migrasi Data</span>
+                  <p>Simpan</p>
                 </>
               )}
             </Button>
-          </div>
-        </div>
+          </CardFooter>
+        </Card>
 
         {/* RIGHT COLUMN: PRATINJAU DATA */}
         <div className="lg:col-span-7 p-4 sm:p-6 rounded-2xl border border-border bg-card shadow-md flex flex-col justify-between space-y-4 min-h-[380px]">
@@ -701,18 +852,19 @@ export function MigrasiDataForm() {
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center text-center space-y-3 my-auto py-12">
-              <div className="w-14 h-14 rounded-2xl bg-[#4274D9]/10 text-[#4274D9] flex items-center justify-center ring-8 ring-[#4274D9]/5">
-                <FileUp className="h-7 w-7 text-[#4274D9]" />
+              <div className="p-2.5 shrink-0 transition-transform duration-200 hover:scale-110">
+                <FontAwesomeIcon
+                  icon={faFilePdf}
+                  aria-hidden="true"
+                  style={{ color: "rgb(116, 192, 252)", width: 26, height: 26 }}
+                />
               </div>
               <div className="space-y-1 max-w-xs">
                 <h4 className="text-sm font-bold text-foreground">Pratinjau Masih Kosong</h4>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Pratinjau data siswa akan tampil otomatis di sini setelah berkas <strong>.pdf</strong> atau <strong>.xlsx</strong> diunggah.
+                  Upload data untuk melihat pratinjau <strong>.pdf</strong> atau <strong>.xlsx</strong> diunggah.
                 </p>
               </div>
-              <Badge variant="outline" className="text-[10px] text-muted-foreground bg-background border-border/80 font-mono">
-                Menunggu Pengunggahan Berkas...
-              </Badge>
             </div>
           )}
 
@@ -726,7 +878,7 @@ export function MigrasiDataForm() {
                 {skippedRows.length > 0 ? ` (${skippedRows.length} baris dilewati saat parsing)` : ""}.
               </span>
             ) : (
-              <span>Unggah berkas untuk mengekstrak dan memvalidasi kolom NISN/NIS, Nama, serta Jenis Kelamin.</span>
+              <span>Unggah berkas</span>
             )}
           </div>
         </div>
@@ -834,4 +986,3 @@ export function MigrasiDataForm() {
     </div>
   )
 }
-

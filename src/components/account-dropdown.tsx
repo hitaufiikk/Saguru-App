@@ -139,7 +139,7 @@ export function AccountDropdown() {
           if (p.avatarUrl) setAvatarUrl(p.avatarUrl)
           if (p.wallpaperUrl) setWallpaperUrl(p.wallpaperUrl)
           if (p.mapel) setMapel(p.mapel)
-          if (p.kelasAjar && p.kelasAjar.length > 0) setKelasAjar(p.kelasAjar)
+          if (p.kelasAjar) setKelasAjar(p.kelasAjar)
           if (p.waliKelas !== undefined) setWaliKelas(p.waliKelas)
           if (p.tahunAjaran) setTahunAjaran(p.tahunAjaran)
 
@@ -151,7 +151,7 @@ export function AccountDropdown() {
             localStorage.setItem("saguru_wallpaper_photo", p.wallpaperUrl || DEFAULT_WALLPAPER)
             localStorage.setItem("saguru_profile_mapel", p.mapel || DEFAULT_MAPEL)
             localStorage.setItem("saguru_profile_kelas_ajar", JSON.stringify(p.kelasAjar || DEFAULT_KELAS_AJAR))
-            localStorage.setItem("saguru_profile_wali_kelas", p.waliKelas || DEFAULT_WALI_KELAS)
+            localStorage.setItem("saguru_profile_wali_kelas", p.waliKelas ?? DEFAULT_WALI_KELAS)
             localStorage.setItem("saguru_profile_tahun_ajaran", p.tahunAjaran || DEFAULT_TAHUN_AJARAN)
           } catch (e) {}
           return
@@ -176,12 +176,12 @@ export function AccountDropdown() {
         if (savedKelasAjar && isMounted) {
           try {
             const parsed = JSON.parse(savedKelasAjar)
-            if (Array.isArray(parsed) && parsed.length > 0) setKelasAjar(parsed)
+            if (Array.isArray(parsed)) setKelasAjar(parsed)
           } catch (e) {}
         }
 
         const savedWaliKelas = localStorage.getItem("saguru_profile_wali_kelas")
-        if (savedWaliKelas && isMounted) setWaliKelas(savedWaliKelas)
+        if (savedWaliKelas !== null && isMounted) setWaliKelas(savedWaliKelas)
 
         const savedTahunAjaran = localStorage.getItem("saguru_profile_tahun_ajaran")
         if (savedTahunAjaran && isMounted) setTahunAjaran(savedTahunAjaran)
