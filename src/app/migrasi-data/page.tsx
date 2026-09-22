@@ -3,10 +3,10 @@ import { MigrasiDataForm } from "@/components/migrasi-card"
 
 export default function MigrasiDataPage() {
   return (
-    <main className="min-h-screen bg-background text-foreground p-3 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
-      <div className="max-w-[1400px] mx-auto">
+    <div className="flex-1 flex flex-col justify-center p-3 sm:p-5 lg:p-6 overflow-hidden max-h-full">
+      <div className="w-full max-w-[1400px] mx-auto">
         <MigrasiDataForm />
       </div>
-    </main>
+    </div>
   )
 }

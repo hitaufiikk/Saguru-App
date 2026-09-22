@@ -442,10 +442,10 @@ export function MigrasiDataForm() {
 
   return (
     <div className="w-full">
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-stretch w-full">
         {/* LEFT COLUMN: FORM INPUT */}
-        <Card className="lg:col-span-5 border-border bg-card shadow-sm p-0 overflow-hidden">
-          <CardHeader className="p-5 pb-4">
+        <Card className="lg:col-span-5 border-border bg-card shadow-sm p-0 overflow-hidden flex flex-col justify-between">
+          <CardHeader className="p-4 sm:p-5 pb-3">
             <CardTitle className="text-base font-bold text-foreground">
               Impor Data Siswa
             </CardTitle>
@@ -454,8 +454,8 @@ export function MigrasiDataForm() {
             </CardDescription>
           </CardHeader>
 
-          <CardContent className="p-5 pt-0 space-y-4">
-            <FieldGroup className="space-y-4">
+          <CardContent className="p-4 sm:p-5 pt-0 space-y-3.5">
+            <FieldGroup className="space-y-3.5">
               {/* Field 1: Pilih Kelas Tujuan */}
               <Field className="space-y-1.5">
                 <FieldLabel htmlFor="migrasi-kelas" className="text-xs font-semibold text-foreground">
@@ -631,8 +631,8 @@ export function MigrasiDataForm() {
             </FieldGroup>
           </CardContent>
 
-          {/* CardFooter: Submit Button (tanpa mt-auto) */}
-          <CardFooter className="p-5 pt-3 border-t border-border">
+          {/* CardFooter: Submit Button */}
+          <CardFooter className="p-4 sm:p-5 pt-3 border-t border-border">
             <Button
               type="submit"
               disabled={
@@ -673,10 +673,10 @@ export function MigrasiDataForm() {
         </Card>
 
         {/* RIGHT COLUMN: PRATINJAU DATA */}
-        <div className="lg:col-span-7 p-4 sm:p-6 rounded-2xl border border-border bg-card shadow-md flex flex-col justify-between space-y-4 min-h-[380px]">
+        <div className="lg:col-span-7 p-4 sm:p-5 lg:p-6 rounded-2xl border border-border bg-card shadow-sm flex flex-col justify-between space-y-3 sm:space-y-4 overflow-hidden">
           {fileName && parsedData.length > 0 ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="space-y-3 sm:space-y-3.5 flex-1 flex flex-col min-h-0">
+              <div className="flex items-center justify-between shrink-0">
                 <div>
                   <h3 className="text-base font-bold text-foreground">Pratinjau Data Berkas</h3>
                   <p className="text-xs text-muted-foreground">
@@ -686,7 +686,7 @@ export function MigrasiDataForm() {
                 <button
                   type="button"
                   onClick={() => setShowPreview(!showPreview)}
-                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted px-2.5 py-1 rounded-md transition-colors border border-border/50"
+                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted px-2.5 py-1 rounded-md transition-colors border border-border/50 cursor-pointer"
                 >
                   {showPreview ? (
                     <>
@@ -703,7 +703,7 @@ export function MigrasiDataForm() {
               </div>
 
               {/* File Info Badge Banner */}
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium">
+              <div className="flex items-center justify-between p-2 sm:p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium shrink-0">
                 <span className="flex items-center gap-2 truncate font-mono text-[11px]">
                   {isPdf ? (
                     <FileText className="h-4 w-4 text-emerald-600 shrink-0" />
@@ -719,24 +719,24 @@ export function MigrasiDataForm() {
 
               {/* Validation Alert Banner (Jika ada identitas kosong atau duplikat) */}
               {validationResult.totalRejected > 0 && (
-                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-800 dark:text-rose-300 text-xs flex flex-col gap-1.5">
+                <div className="p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-800 dark:text-rose-300 text-xs flex flex-col gap-1 shrink-0">
                   <div className="flex items-center justify-between font-semibold">
                     <span className="flex items-center gap-1.5">
                       <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
-                      Perhatian: {validationResult.totalRejected} siswa memiliki identitas kosong atau duplikat (tidak akan disimpan)
+                      Perhatian: {validationResult.totalRejected} siswa tidak valid/duplikat
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowValidationDetails(!showValidationDetails)}
                       className="text-[11px] underline text-rose-700 dark:text-rose-200 hover:opacity-80 cursor-pointer font-normal"
                     >
-                      {showValidationDetails ? "Sembunyikan Rincian" : "Lihat Rincian Penolakan"}
+                      {showValidationDetails ? "Sembunyikan" : "Rincian"}
                     </button>
                   </div>
                   {showValidationDetails && (
-                    <div className="max-h-28 overflow-y-auto mt-1 border-t border-rose-500/20 pt-1.5 space-y-1">
+                    <div className="max-h-20 overflow-y-auto mt-1 border-t border-rose-500/20 pt-1 space-y-0.5">
                       {validationResult.rejectedStudents.map((rf, idx) => (
-                        <div key={idx} className="text-[11px] font-mono text-rose-900 dark:text-rose-200">
+                        <div key={idx} className="text-[10px] font-mono text-rose-900 dark:text-rose-200">
                           • Baris {rf.rowNumber || idx + 1} ({rf.nama || "Tanpa Nama"}): {rf.reason}
                         </div>
                       ))}
@@ -747,24 +747,24 @@ export function MigrasiDataForm() {
 
               {/* Skipped Rows Alert Banner (jika ada baris yang dilewati saat parsing) */}
               {skippedRows.length > 0 && (
-                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex flex-col gap-1.5">
+                <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex flex-col gap-1 shrink-0">
                   <div className="flex items-center justify-between font-semibold">
                     <span className="flex items-center gap-1.5">
                       <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                      Perhatian: {skippedRows.length} baris dilewati (tidak dapat diimpor)
+                      Perhatian: {skippedRows.length} baris dilewati
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowSkippedDetails(!showSkippedDetails)}
                       className="text-[11px] underline text-amber-700 dark:text-amber-200 hover:opacity-80 cursor-pointer font-normal"
                     >
-                      {showSkippedDetails ? "Sembunyikan Rincian" : "Lihat Rincian Baris"}
+                      {showSkippedDetails ? "Sembunyikan" : "Rincian"}
                     </button>
                   </div>
                   {showSkippedDetails && (
-                    <div className="max-h-28 overflow-y-auto mt-1 border-t border-amber-500/20 pt-1.5 space-y-1">
+                    <div className="max-h-20 overflow-y-auto mt-1 border-t border-amber-500/20 pt-1 space-y-0.5">
                       {skippedRows.map((sr, idx) => (
-                        <div key={idx} className="text-[11px] font-mono text-amber-900 dark:text-amber-200">
+                        <div key={idx} className="text-[10px] font-mono text-amber-900 dark:text-amber-200">
                           • Baris {sr.rowNumber}: {sr.reason}
                         </div>
                       ))}
@@ -775,7 +775,7 @@ export function MigrasiDataForm() {
 
               {/* Table Preview */}
               {showPreview ? (
-                <div className="rounded-xl border border-border bg-background overflow-hidden max-h-[260px] overflow-y-auto">
+                <div className="rounded-xl border border-border bg-background overflow-hidden max-h-[190px] sm:max-h-[220px] overflow-y-auto flex-1 min-h-[120px]">
                   <Table>
                     <Table.ScrollContainer>
                       <Table.Content aria-label="Pratinjau Berkas" className="min-w-[480px]">
@@ -837,13 +837,13 @@ export function MigrasiDataForm() {
                   </Table>
                 </div>
               ) : (
-                <div className="p-8 rounded-xl border border-dashed border-border bg-muted/20 text-center space-y-2">
+                <div className="p-6 rounded-xl border border-dashed border-border bg-muted/20 text-center space-y-2 my-auto">
                   <EyeOff className="h-8 w-8 text-muted-foreground mx-auto opacity-40" />
                   <p className="text-xs font-medium text-muted-foreground">Pratinjau data sedang disembunyikan.</p>
                   <button
                     type="button"
                     onClick={() => setShowPreview(true)}
-                    className="text-xs text-[#4274D9] hover:underline font-semibold"
+                    className="text-xs text-[#4274D9] hover:underline font-semibold cursor-pointer"
                   >
                     Klik untuk menampilkan pratinjau
                   </button>
@@ -851,7 +851,7 @@ export function MigrasiDataForm() {
               )}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center text-center space-y-3 my-auto py-12">
+            <div className="flex flex-col items-center justify-center text-center space-y-3 my-auto py-8 sm:py-10">
               <div className="p-2.5 shrink-0 transition-transform duration-200 hover:scale-110">
                 <FontAwesomeIcon
                   icon={faFilePdf}
@@ -869,7 +869,7 @@ export function MigrasiDataForm() {
           )}
 
           {/* Footer Info Tip */}
-          <div className="flex items-center gap-2 pt-3 border-t border-border text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-2 pt-2.5 border-t border-border text-[11px] text-muted-foreground shrink-0">
             <Info className="h-3.5 w-3.5 text-[#4274D9] shrink-0" />
             {fileName && parsedData.length > 0 ? (
               <span>
@@ -878,7 +878,7 @@ export function MigrasiDataForm() {
                 {skippedRows.length > 0 ? ` (${skippedRows.length} baris dilewati saat parsing)` : ""}.
               </span>
             ) : (
-              <span>Unggah berkas</span>
+              <span>Unggah berkas untuk melihat pratinjau</span>
             )}
           </div>
         </div>

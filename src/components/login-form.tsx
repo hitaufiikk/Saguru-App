@@ -104,36 +104,36 @@ export function LoginForm({ className, ...props }: ComponentProps<"div">) {
   }
 
   const disabled = busy || checking
-  return <div className={cn("flex flex-col gap-6", className)} {...props}>
+  return <div className={cn("flex flex-col gap-3 sm:gap-5", className)} {...props}>
     <Card className="rounded-2xl border-blue-100 bg-white text-slate-900 shadow-xl shadow-blue-950/15 dark:border-blue-900 dark:bg-slate-900 dark:text-slate-100">
-      <CardHeader className="text-center">
-        <CardTitle className="text-2xl text-[#315fbd] dark:text-blue-300">{mode === "login" ? "Selamat datang di SAGURU" : mode === "forgot" ? "Lupa kata sandi?" : "Buat kata sandi baru"}</CardTitle>
-        <CardDescription className="text-slate-500 dark:text-slate-400">{mode === "login" ? "Masuk menggunakan akun guru Anda." : mode === "forgot" ? "Kami akan mengirim tautan pemulihan ke email Anda." : "Gunakan minimal 8 karakter untuk kata sandi baru."}</CardDescription>
+      <CardHeader className="text-center pb-2 pt-5 sm:pt-6">
+        <CardTitle className="text-xl sm:text-2xl text-[#315fbd] dark:text-blue-300">{mode === "login" ? "Selamat datang di SAGURU" : mode === "forgot" ? "Lupa kata sandi?" : "Buat kata sandi baru"}</CardTitle>
+        <CardDescription className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">{mode === "login" ? "Masuk menggunakan akun guru Anda." : mode === "forgot" ? "Kami akan mengirim tautan pemulihan ke email Anda." : "Gunakan minimal 8 karakter untuk kata sandi baru."}</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pb-5 sm:pb-6">
         <form onSubmit={submit} aria-busy={disabled}>
           <fieldset disabled={disabled}>
-            <FieldGroup>
-              {mode !== "reset" && <Field><FieldLabel htmlFor="email">Email</FieldLabel><Input id="email" name="email" type="email" placeholder="nama@gmail.com" autoComplete="username" className="h-11" required /></Field>}
+            <FieldGroup className="gap-3 sm:gap-3.5">
+              {mode !== "reset" && <Field><FieldLabel htmlFor="email" className="text-xs sm:text-sm font-medium">Email</FieldLabel><Input id="email" name="email" type="email" placeholder="nama@gmail.com" autoComplete="username" className="h-10 sm:h-11 text-xs sm:text-sm" required /></Field>}
               {mode !== "forgot" && <Field>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <FieldLabel htmlFor="password">{mode === "reset" ? "Kata sandi baru" : "Kata sandi"}</FieldLabel>
-                  {mode === "login" && <button type="button" className="text-sm text-[#315fbd] underline-offset-4 hover:underline dark:text-blue-300" onClick={() => { setMode("forgot"); setError(""); setMessage("") }}>Lupa kata sandi?</button>}
+                  <FieldLabel htmlFor="password" className="text-xs sm:text-sm font-medium">{mode === "reset" ? "Kata sandi baru" : "Kata sandi"}</FieldLabel>
+                  {mode === "login" && <button type="button" className="text-xs sm:text-sm text-[#315fbd] underline-offset-4 hover:underline dark:text-blue-300" onClick={() => { setMode("forgot"); setError(""); setMessage("") }}>Lupa kata sandi?</button>}
                 </div>
-                <div className="relative"><Input id="password" name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "reset" ? "new-password" : "current-password"} minLength={mode === "reset" ? 8 : undefined} className="h-11 pr-12" required />
-                  <button type="button" className="absolute inset-y-0 right-0 px-3" aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"} aria-pressed={showPassword} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button>
+                <div className="relative"><Input id="password" name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "reset" ? "new-password" : "current-password"} minLength={mode === "reset" ? 8 : undefined} className="h-10 sm:h-11 pr-12 text-xs sm:text-sm" required />
+                  <button type="button" className="absolute inset-y-0 right-0 px-3 flex items-center justify-center text-muted-foreground hover:text-foreground" aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"} aria-pressed={showPassword} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button>
                 </div>
               </Field>}
-              {mode === "reset" && <Field><FieldLabel htmlFor="confirmation">Konfirmasi kata sandi</FieldLabel><Input id="confirmation" name="confirmation" type="password" autoComplete="new-password" minLength={8} required className="h-11" /></Field>}
-              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-              {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
-              <Field><Button type="submit" className="h-11 w-full bg-[#4274D9] text-white hover:bg-[#315fbd] focus-visible:ring-blue-400/50">{disabled && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}{checking ? "Memeriksa sesi…" : busy ? "Memproses…" : mode === "login" ? "Masuk" : mode === "forgot" ? "Kirim tautan pemulihan" : "Simpan kata sandi"}</Button></Field>
-              {mode !== "login" && <button type="button" className="text-sm text-[#315fbd] underline-offset-4 hover:underline dark:text-blue-300" onClick={() => { setMode("login"); setError(""); setMessage("") }}>Kembali ke halaman masuk</button>}
+              {mode === "reset" && <Field><FieldLabel htmlFor="confirmation" className="text-xs sm:text-sm font-medium">Konfirmasi kata sandi</FieldLabel><Input id="confirmation" name="confirmation" type="password" autoComplete="new-password" minLength={8} required className="h-10 sm:h-11 text-xs sm:text-sm" /></Field>}
+              {error && <p role="alert" className="text-xs sm:text-sm text-destructive">{error}</p>}
+              {message && <p role="status" className="text-xs sm:text-sm text-muted-foreground">{message}</p>}
+              <Field><Button type="submit" className="h-10 sm:h-11 w-full bg-[#4274D9] text-white hover:bg-[#315fbd] focus-visible:ring-blue-400/50 text-xs sm:text-sm font-medium">{disabled && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}{checking ? "Memeriksa sesi…" : busy ? "Memproses…" : mode === "login" ? "Masuk" : mode === "forgot" ? "Kirim tautan pemulihan" : "Simpan kata sandi"}</Button></Field>
+              {mode !== "login" && <button type="button" className="text-xs sm:text-sm text-[#315fbd] underline-offset-4 hover:underline dark:text-blue-300 text-center" onClick={() => { setMode("login"); setError(""); setMessage("") }}>Kembali ke halaman masuk</button>}
             </FieldGroup>
           </fieldset>
         </form>
       </CardContent>
     </Card>
-    <p className="px-6 text-center text-sm text-blue-50">Akses khusus akun guru yang telah diaktifkan.</p>
+    <p className="px-6 text-center text-xs text-blue-100/80">Akses khusus akun guru yang telah diaktifkan.</p>
   </div>
 }
