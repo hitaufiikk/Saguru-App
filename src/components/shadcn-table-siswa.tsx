@@ -562,11 +562,11 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
 
       {/* HeroUI Table Component */}
       <Table>
-        <Table.ScrollContainer>
+        <Table.ScrollContainer className="table-scroll-area max-h-[420px] sm:max-h-[480px] overflow-y-auto relative overscroll-contain rounded-lg border border-border/60">
           <Table.Content aria-label="Data Siswa Table" className="min-w-[760px]">
-            <Table.Header>
+            <Table.Header className="sticky top-0 z-10 bg-card shadow-2xs">
               {isSelectionMode && (
-                <Table.Column className="w-10 text-center animate-in fade-in">
+                <Table.Column className="w-10 text-center animate-in fade-in bg-card sticky top-0 z-10">
                   <div className="flex items-center justify-center">
                     <Checkbox
                       checked={isAllSelected}
@@ -577,12 +577,12 @@ export function ShadcnTableSiswa({ kelasCode = "9a" }: { kelasCode?: string } = 
                   </div>
                 </Table.Column>
               )}
-              <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
-              <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
-              <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
-              <Table.Column className="text-foreground font-semibold">L/P</Table.Column>
-              <Table.Column className="text-foreground font-semibold">Kontak Ortu</Table.Column>
-              <Table.Column className="text-foreground font-semibold text-center">Aksi</Table.Column>
+              <Table.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">No Abs</Table.Column>
+              <Table.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">NISN</Table.Column>
+              <Table.Column isRowHeader className="text-foreground font-semibold bg-card sticky top-0 z-10">Nama</Table.Column>
+              <Table.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">L/P</Table.Column>
+              <Table.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">Kontak Ortu</Table.Column>
+              <Table.Column className="text-foreground font-semibold text-center bg-card sticky top-0 z-10">Aksi</Table.Column>
             </Table.Header>
             <Table.Body>
               {paginatedStudents.length === 0 ? (

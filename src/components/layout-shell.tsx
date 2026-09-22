@@ -99,10 +99,10 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       enableSystem
       disableTransitionOnChange
     >
-      <SidebarProvider defaultOpen={false}>
+      <SidebarProvider defaultOpen={false} className="h-dvh max-h-dvh overflow-hidden flex w-full">
         <AppSidebar />
-        <div className={cn("flex-1 flex flex-col w-full", isMigrasiPage ? "h-screen overflow-hidden" : "min-h-screen")}>
-          <header className="sticky top-0 z-50 w-full border-b border-blue-400/30 bg-[#4274D9] text-white dark:bg-[#0F172A] dark:text-[#60A5FA] dark:border-[#1E293B] backdrop-blur-md px-3 sm:px-6 py-2 sm:py-2.5 lg:py-3 flex items-center justify-between transition-colors duration-200">
+        <div className="flex-1 flex flex-col w-full h-full min-h-0 overflow-hidden">
+          <header className="shrink-0 z-50 w-full border-b border-blue-400/30 bg-[#4274D9] text-white dark:bg-[#0F172A] dark:text-[#60A5FA] dark:border-[#1E293B] backdrop-blur-md px-3 sm:px-6 py-2 sm:py-2.5 lg:py-3 flex items-center justify-between transition-colors duration-200">
             {/* Desktop Left Brand "SAGURU" */}
             <div className="hidden lg:flex items-center">
               <BrandLink />
@@ -120,10 +120,12 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
-          {accessError && <p role="alert" className="p-3 text-sm bg-amber-100 text-amber-950">{accessError} Isian Anda tetap terbuka; penyimpanan tetap memerlukan izin server.</p>}
-          <main className={cn("flex-1 font-sans", isMigrasiPage && "overflow-hidden flex flex-col")}>{children}</main>
+          <div className={cn("flex-1 flex flex-col min-h-0 w-full", isMigrasiPage ? "overflow-hidden" : "overflow-y-auto overscroll-contain")}>
+            {accessError && <p role="alert" className="p-3 text-sm bg-amber-100 text-amber-950 shrink-0">{accessError} Isian Anda tetap terbuka; penyimpanan tetap memerlukan izin server.</p>}
+            <main className={cn("flex-1 font-sans", isMigrasiPage && "overflow-hidden flex flex-col")}>{children}</main>
 
-          {!isMigrasiPage && <Footer />}
+            {!isMigrasiPage && <Footer />}
+          </div>
         </div>
       </SidebarProvider>
     </ThemeProvider>

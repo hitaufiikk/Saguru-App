@@ -491,15 +491,15 @@ export function TugasFreeformTable({ kelasCode = "9b" }: { kelasCode?: string } 
       ) : (
         <div className="space-y-4">
           {/* A. Desktop & Tablet View: Shadcn Table */}
-          <div className="hidden md:block rounded-xl border border-border bg-card overflow-x-auto shadow-xs">
+          <div className="hidden md:block rounded-xl border border-border bg-card overflow-y-auto max-h-[420px] sm:max-h-[480px] table-scroll-area relative overscroll-contain shadow-xs">
             <Table className="min-w-[640px]">
-              <TableHeader>
-                <TableRow className="bg-muted/50">
-                  <TableHead className="text-center w-14 font-semibold text-xs">No</TableHead>
-                  <TableHead className="text-center w-28 font-semibold text-xs">NISN</TableHead>
-                  <TableHead className="min-w-[160px] font-semibold text-xs">Nama Siswa</TableHead>
-                  <TableHead className="text-center w-14 font-semibold text-xs">L/P</TableHead>
-                  <TableHead className="min-w-[320px] font-semibold text-xs">Catatan / Tagihan Tugas Bebas</TableHead>
+              <TableHeader className="sticky top-0 z-10 bg-card shadow-2xs">
+                <TableRow className="bg-card">
+                  <TableHead className="text-center w-14 font-semibold text-xs bg-card sticky top-0 z-10">No</TableHead>
+                  <TableHead className="text-center w-28 font-semibold text-xs bg-card sticky top-0 z-10">NISN</TableHead>
+                  <TableHead className="min-w-[160px] font-semibold text-xs bg-card sticky top-0 z-10">Nama Siswa</TableHead>
+                  <TableHead className="text-center w-14 font-semibold text-xs bg-card sticky top-0 z-10">L/P</TableHead>
+                  <TableHead className="min-w-[320px] font-semibold text-xs bg-card sticky top-0 z-10">Catatan / Tagihan Tugas Bebas</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

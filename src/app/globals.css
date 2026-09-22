@@ -243,3 +243,38 @@
 .loading-md { width: 1.5rem; height: 1.5rem; border-width: 2.5px; }
 .loading-lg { width: 2.25rem; height: 2.25rem; border-width: 3px; }
 .loading-xl { width: 3rem; height: 3rem; border-width: 3.5px; }
+
+/* Table Scroll & Sticky Headers */
+.table-scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll-area::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.table-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.table-scroll-area::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 9999px;
+}
+
+.table-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.45);
+}
+
+/* Ensure sticky th cells in table-scroll-area stick reliably across all browsers */
+.table-scroll-area th,
+.table-scroll-area [data-slot="table-column"],
+.table-scroll-area .table__column {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: var(--card);
+}

@@ -5,7 +5,7 @@ import { MarqueeDemo } from "@/components/marquee-demo";
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-background text-foreground font-sans pt-3 sm:pt-6 pb-16 sm:pb-20 space-y-4 sm:space-y-6">
+    <main className="flex-1 w-full bg-background text-foreground font-sans pt-3 sm:pt-6 pb-6 sm:pb-10 space-y-4 sm:space-y-6">
       <WelcomeBanner />
       <StatisticsCard />
       <QuickActionsSchedule />

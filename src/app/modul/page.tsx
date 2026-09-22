@@ -24,7 +24,7 @@ export default function ModulPage() {
   )
 
   return (
-    <main className="min-h-screen bg-background text-foreground pt-4 sm:pt-6 pb-20 px-4 sm:px-6">
+    <main className="flex-1 w-full bg-background text-foreground pt-4 sm:pt-6 pb-8 sm:pb-12 px-4 sm:px-6">
       <div className="max-w-5xl lg:max-w-6xl mx-auto space-y-6">
         {/* Breadcrumb Navigation */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">

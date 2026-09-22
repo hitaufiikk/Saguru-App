@@ -168,18 +168,18 @@ export function JadwalMengajarTable() {
 
       {/* Table Container - Clean Plain Text without Colored Badges */}
       <HeroTable>
-        <HeroTable.ScrollContainer>
+        <HeroTable.ScrollContainer className="table-scroll-area max-h-[420px] sm:max-h-[480px] overflow-y-auto relative overscroll-contain rounded-lg border border-border/60">
           <HeroTable.Content aria-label="Jadwal Mengajar Bu Devy" className="min-w-[850px]">
-            <HeroTable.Header>
-              <HeroTable.Column className="text-foreground font-semibold">No</HeroTable.Column>
-              <HeroTable.Column className="text-foreground font-semibold">Hari</HeroTable.Column>
-              <HeroTable.Column className="text-foreground font-semibold">Jam Ke</HeroTable.Column>
-              <HeroTable.Column className="text-foreground font-semibold">Waktu</HeroTable.Column>
-              <HeroTable.Column className="text-foreground font-semibold">Kelas</HeroTable.Column>
-              <HeroTable.Column isRowHeader className="text-foreground font-semibold">Mata Pelajaran</HeroTable.Column>
-              <HeroTable.Column className="text-foreground font-semibold">Kategori</HeroTable.Column>
-              <HeroTable.Column className="text-foreground font-semibold">Lokasi / Ruangan</HeroTable.Column>
-              <HeroTable.Column className="text-foreground font-semibold text-center">Aksi Presensi</HeroTable.Column>
+            <HeroTable.Header className="sticky top-0 z-10 bg-card shadow-2xs">
+              <HeroTable.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">No</HeroTable.Column>
+              <HeroTable.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">Hari</HeroTable.Column>
+              <HeroTable.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">Jam Ke</HeroTable.Column>
+              <HeroTable.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">Waktu</HeroTable.Column>
+              <HeroTable.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">Kelas</HeroTable.Column>
+              <HeroTable.Column isRowHeader className="text-foreground font-semibold bg-card sticky top-0 z-10">Mata Pelajaran</HeroTable.Column>
+              <HeroTable.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">Kategori</HeroTable.Column>
+              <HeroTable.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">Lokasi / Ruangan</HeroTable.Column>
+              <HeroTable.Column className="text-foreground font-semibold text-center bg-card sticky top-0 z-10">Aksi Presensi</HeroTable.Column>
             </HeroTable.Header>
 
             <HeroTable.Body>

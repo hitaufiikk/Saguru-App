@@ -759,21 +759,21 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
 
       {/* Main Matriks Table Container */}
       <Table>
-        <Table.ScrollContainer>
+        <Table.ScrollContainer className="table-scroll-area max-h-[420px] sm:max-h-[480px] overflow-y-auto relative overscroll-contain rounded-lg border border-border/60">
           <Table.Content aria-label={`Data Tugas Siswa Kelas ${kelasCode.toUpperCase()}`} className="min-w-[760px]">
-            <Table.Header>
+            <Table.Header className="sticky top-0 z-10 bg-card shadow-2xs">
 
-              <Table.Column className="text-foreground font-semibold">No Abs</Table.Column>
-              <Table.Column className="text-foreground font-semibold">NISN</Table.Column>
-              <Table.Column isRowHeader className="text-foreground font-semibold">Nama</Table.Column>
-              <Table.Column className="text-foreground font-semibold">L/P</Table.Column>
+              <Table.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">No Abs</Table.Column>
+              <Table.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">NISN</Table.Column>
+              <Table.Column isRowHeader className="text-foreground font-semibold bg-card sticky top-0 z-10">Nama</Table.Column>
+              <Table.Column className="text-foreground font-semibold bg-card sticky top-0 z-10">L/P</Table.Column>
 
               {/* Dynamic Task Header Columns: Fleksibel & Dapat Diklik */}
               {mapelTasks.map((task, idx) => {
                 const displayLabel = task.label || `Tugas ${idx + 1}`
                 const displayTopic = task.topic || task.title
                 return (
-                  <Table.Column key={task.id} className="text-foreground font-semibold text-center min-w-[95px] p-1">
+                  <Table.Column key={task.id} className="text-foreground font-semibold text-center min-w-[95px] p-1 bg-card sticky top-0 z-10">
                     <button
                       type="button"
                       onClick={() => setSelectedDetailTask(task)}
@@ -792,8 +792,8 @@ export function TugasTable({ kelasCode = "9a" }: { kelasCode?: string } = {}) {
               })}
 
               {/* Summary Columns */}
-              <Table.Column className="text-foreground font-semibold text-center">Rata-rata</Table.Column>
-              <Table.Column className="text-foreground font-semibold text-center">Status</Table.Column>
+              <Table.Column className="text-foreground font-semibold text-center bg-card sticky top-0 z-10">Rata-rata</Table.Column>
+              <Table.Column className="text-foreground font-semibold text-center bg-card sticky top-0 z-10">Status</Table.Column>
             </Table.Header>
 
             <Table.Body>

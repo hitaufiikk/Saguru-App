@@ -239,7 +239,7 @@ export default function PerpustakaanPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground pt-3 sm:pt-6 pb-16 sm:pb-20 px-3 sm:px-6 font-sans">
+    <main className="flex-1 w-full bg-background text-foreground pt-3 sm:pt-6 pb-6 sm:pb-10 px-3 sm:px-6 font-sans">
       <div className="max-w-5xl lg:max-w-6xl mx-auto space-y-6">
         {/* Toast Notification */}
         {toastMessage && (
