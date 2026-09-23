@@ -89,42 +89,46 @@ const StatisticsCard = () => {
 
   return (
     <div className="max-w-5xl lg:max-w-6xl mx-auto px-4 sm:px-6 w-full">
-      <Card className="p-0 border border-border shadow-xs overflow-hidden bg-card text-card-foreground">
-        <CardContent className="grid w-full grid-cols-1 md:grid-cols-3 px-0">
-          {TeacherActions.map((item, index) => {
-            return (
-              <GlareHover
-                className="min-w-0 w-full border-border border-b last:border-b-0 md:border-b-0 md:border-e md:last:border-e-0 hover:bg-muted/60 dark:hover:bg-muted/40 transition-colors"
-                key={index}
-                glareColor="#ffffff"
-                glareOpacity={0.75}
-                glareAngle={45}
-                glareSize={200}
-                transitionDuration={700}
-              >
-                <div className="p-5 sm:p-6">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex justify-between items-start gap-2">
-                      <h5 className="text-sm sm:text-base font-semibold text-foreground group-hover:text-primary transition-colors">{item.title}</h5>
-                      <div className="p-2.5 shrink-0 transition-transform duration-200 hover:scale-110">
-                        <FontAwesomeIcon
-                          icon={item.cardIcon}
-                          aria-hidden="true"
-                          style={{ color: "rgb(116, 192, 252)", width: 26, height: 26 }}
-                        />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+        {TeacherActions.map((item, index) => {
+          return (
+            <Card
+              key={index}
+              className="p-0 border border-border shadow-xs overflow-hidden bg-card text-card-foreground"
+            >
+              <CardContent className="p-0">
+                <GlareHover
+                  className="min-w-0 w-full hover:bg-muted/60 dark:hover:bg-muted/40 transition-colors"
+                  glareColor="#ffffff"
+                  glareOpacity={0.75}
+                  glareAngle={45}
+                  glareSize={200}
+                  transitionDuration={700}
+                >
+                  <div className="p-5 sm:p-6">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex justify-between items-start gap-2">
+                        <h5 className="text-sm sm:text-base font-semibold text-foreground group-hover:text-primary transition-colors">{item.title}</h5>
+                        <div className="p-2.5 shrink-0 transition-transform duration-200 hover:scale-110">
+                          <FontAwesomeIcon
+                            icon={item.cardIcon}
+                            aria-hidden="true"
+                            style={{ color: "rgb(116, 192, 252)", width: 26, height: 26 }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <h5 className="text-xl sm:text-2xl font-bold text-foreground">{item.subtitle}</h5>
+                        <p className="text-xs text-muted-foreground mt-0.5">{item.subtext}</p>
                       </div>
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <h5 className="text-xl sm:text-2xl font-bold text-foreground">{item.subtitle}</h5>
-                      <p className="text-xs text-muted-foreground mt-0.5">{item.subtext}</p>
-                    </div>
                   </div>
-                </div>
-              </GlareHover>
-            )
-          })}
-        </CardContent>
-      </Card>
+                </GlareHover>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -122,9 +122,9 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
           <div className={cn("flex-1 flex flex-col min-h-0 w-full", isMigrasiPage ? "overflow-hidden" : "overflow-y-auto overscroll-contain")}>
             {accessError && <p role="alert" className="p-3 text-sm bg-amber-100 text-amber-950 shrink-0">{accessError} Isian Anda tetap terbuka; penyimpanan tetap memerlukan izin server.</p>}
-            <main className={cn("flex-1 font-sans", isMigrasiPage && "overflow-hidden flex flex-col")}>{children}</main>
+            <main className={cn("flex-1 font-sans", isMigrasiPage && "min-h-0 overflow-y-auto overscroll-contain flex flex-col")}>{children}</main>
 
-            {!isMigrasiPage && <Footer />}
+            <Footer />
           </div>
         </div>
       </SidebarProvider>

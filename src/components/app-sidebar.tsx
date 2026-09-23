@@ -3,13 +3,11 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
+import type { IconDefinition } from "@fortawesome/fontawesome-svg-core"
+import { faUsers, faClipboardCheck, faListCheck, faCalendarDays, faClone } from "@fortawesome/free-solid-svg-icons"
 import {
   GraduationCap,
-  Users,
-  ClipboardCheck,
-  FileText,
-  Calendar,
-  Database,
   ChevronDown,
   ChevronRight,
   X,
@@ -40,14 +38,14 @@ interface SubMenuItem {
 
 interface NavGroupItem {
   title: string
-  icon: React.ElementType
+  icon: IconDefinition
   items: SubMenuItem[]
 }
 
 const navGroups: NavGroupItem[] = [
   {
     title: "Data Siswa",
-    icon: Users,
+    icon: faUsers,
     items: [
       {
         title: "Kelas 9A",
@@ -61,7 +59,7 @@ const navGroups: NavGroupItem[] = [
   },
   {
     title: "Presensi",
-    icon: ClipboardCheck,
+    icon: faClipboardCheck,
     items: [
       {
         title: "Presensi 9A",
@@ -83,7 +81,7 @@ const navGroups: NavGroupItem[] = [
   },
   {
     title: "Tagihan Tugas",
-    icon: FileText,
+    icon: faListCheck,
     items: [
       {
         title: "Tagihan Tugas 9A",
@@ -101,7 +99,7 @@ const navGroups: NavGroupItem[] = [
   },
   {
     title: "Jadwal & Modul",
-    icon: Calendar,
+    icon: faCalendarDays,
     items: [
       {
         title: "Jadwal Mengajar",
@@ -209,7 +207,6 @@ export function AppSidebar() {
       {/* 2. Content Sidebar */}
       <SidebarContent className="px-2 py-3 space-y-3 overflow-y-auto">
         {navGroups.map((group) => {
-          const GroupIcon = group.icon
           const isOpen = openGroups[group.title] ?? false
 
           return (
@@ -219,7 +216,7 @@ export function AppSidebar() {
                 className="flex items-center justify-between px-2.5 py-2 text-xs font-bold uppercase tracking-wider text-muted-foreground/90 hover:text-sidebar-foreground cursor-pointer rounded-lg hover:bg-sidebar-accent/50 transition-colors select-none group/label"
               >
                 <div className="flex items-center gap-2">
-                  <GroupIcon className="h-3.5 w-3.5 text-muted-foreground group-hover/label:text-sidebar-foreground transition-colors" />
+                  <FontAwesomeIcon icon={group.icon} aria-hidden="true" className="shrink-0 transition-transform duration-200 group-hover/label:scale-110" style={{ color: "rgb(116, 192, 252)", width: 18, height: 18 }} />
                   <span>{group.title}</span>
                 </div>
                 <div className="flex items-center text-muted-foreground/60 group-hover/label:text-muted-foreground">
@@ -278,14 +275,14 @@ export function AppSidebar() {
                     <Link
                       href="/migrasi-data"
                       onClick={handleNavClick}
-                      className={`flex items-center w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      className={`group/migration flex items-center w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                         pathname === "/migrasi-data"
                           ? "bg-[#4274D9] text-white shadow-xs"
                           : "text-primary hover:bg-primary/10"
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
-                        <Database className="h-4 w-4" />
+                        <FontAwesomeIcon icon={faClone} aria-hidden="true" className="shrink-0 transition-transform duration-200 group-hover/migration:scale-110" style={{ color: "rgb(116, 192, 252)", width: 18, height: 18 }} />
                         <span>Migrasi Data Siswa</span>
                       </div>
                     </Link>

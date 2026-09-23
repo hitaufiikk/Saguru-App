@@ -26,6 +26,14 @@ import { getBannerTimeInfo } from "@/lib/school-date"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuGroup, DropdownMenuLabel,
   DropdownMenuRadioGroup, DropdownMenuRadioItem,
@@ -56,6 +64,7 @@ import {
 import {
   ChevronDown,
   CheckCircle2,
+  BadgeCheck,
   FileSpreadsheet,
   FileText,
   ArrowRight,
@@ -169,6 +178,16 @@ export function MigrasiDataForm() {
   // Evaluasi validitas identitas sebelum penyimpanan
   const validationResult = useMemo(() => validateStudentsForSave(parsedData), [parsedData])
 
+  // Pagination Pratinjau
+  const [currentPage, setCurrentPage] = useState<number>(1)
+  const itemsPerPage = 15
+  const totalPages = Math.max(1, Math.ceil(parsedData.length / itemsPerPage))
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages)
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage
+  const paginatedData = useMemo(() => {
+    return parsedData.slice(startIndex, startIndex + itemsPerPage)
+  }, [parsedData, startIndex, itemsPerPage])
+
   // Success Modal Dialog State
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false)
   const [submittedInfo, setSubmittedInfo] = useState<{
@@ -192,6 +211,7 @@ export function MigrasiDataForm() {
       setFileName(file.name)
       setIsLoadingFile(true)
       setParsedData([])
+      setCurrentPage(1)
       setTotalRows(0)
       setSkippedRows([])
       setShowSkippedDetails(false)
@@ -424,6 +444,7 @@ export function MigrasiDataForm() {
       // Reset form & preview state hanya setelah penyimpanan Supabase berhasil
       setFileName("")
       setParsedData([])
+      setCurrentPage(1)
       setTotalRows(0)
       setSkippedRows([])
       setShowSkippedDetails(false)
@@ -488,8 +509,8 @@ export function MigrasiDataForm() {
 
               {/* Field 2: Informasi Periode Akademik & Penugasan Guru */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Info Periode Otomatis */}
-                <Field className="space-y-1.5">
+                {/* Pilihan periode tampilan, dengan periode saat ini sebagai nilai awal. */}
+                <Field className="min-w-0 space-y-1.5">
                   <FieldLabel htmlFor="migrasi-periode" className="text-xs font-semibold text-foreground">
                     Tahun Ajaran &amp; Semester
                   </FieldLabel>
@@ -501,12 +522,12 @@ export function MigrasiDataForm() {
                       <span className="truncate">{selectedPeriod ?? academicPeriods?.current ?? "Memuat periode…"}</span>
                       <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
+                    <DropdownMenuContent align="start" className="min-w-56 max-w-[calc(100vw-2rem)]">
                       <DropdownMenuGroup>
                         <DropdownMenuLabel>Pilih periode akademik</DropdownMenuLabel>
                         <DropdownMenuRadioGroup value={selectedPeriod ?? academicPeriods?.current ?? ""} onValueChange={(value) => setSelectedPeriod(value)}>
                           {academicPeriods?.options.map((period) => (
-                            <DropdownMenuRadioItem key={period} value={period} className="text-xs">{period}</DropdownMenuRadioItem>
+                            <DropdownMenuRadioItem key={period} value={period} className="py-2 text-xs">{period}</DropdownMenuRadioItem>
                           ))}
                         </DropdownMenuRadioGroup>
                       </DropdownMenuGroup>
@@ -515,11 +536,11 @@ export function MigrasiDataForm() {
                 </Field>
 
                 {/* Info Penugasan Guru Otomatis */}
-                <Field className="space-y-1.5">
+                <Field className="min-w-0 space-y-1.5">
                   <FieldLabel className="text-xs font-semibold text-foreground">
                     Penugasan Guru
                   </FieldLabel>
-                  <div className="h-9 px-3 rounded-md bg-muted/50 border border-border flex items-center justify-between text-xs">
+                  <div className="flex min-h-9 min-w-0 items-center text-xs" aria-live="polite">
                     {isProfileLoading ? (
                       <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
                         <Loader2 className="h-3 w-3 animate-spin text-[#4274D9]" />
@@ -537,11 +558,11 @@ export function MigrasiDataForm() {
                         </button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 truncate">
-                        <Badge variant="secondary">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="shrink-0 font-normal">
                           {penugasanLabel}
                         </Badge>
-                        <span className="truncate text-foreground font-medium text-xs" title={teacherProfile?.name}>
+                        <span className="min-w-0 truncate text-xs text-muted-foreground" title={teacherProfile?.name}>
                           {teacherProfile?.name || "-"}
                         </span>
                       </div>
@@ -555,10 +576,10 @@ export function MigrasiDataForm() {
                 <FieldLabel htmlFor="migrasi-file-input" className="text-xs font-semibold text-foreground">
                   Pilih Berkas
                 </FieldLabel>
-                <FieldDescription className="text-[11px] text-muted-foreground">
+                <FieldDescription className="text-[11px] text-muted-foreground" aria-live="polite">
                   {isProfileLoading
                     ? "Menyesuaikan dengan profil guru..."
-                    : profileError
+                    : profileError || !teacherProfile
                       ? "Profil gagal dimuat."
                       : isWaliKelasForSelected
                         ? `Kelas perwalian: ${cleanSelectedClass}`
@@ -673,10 +694,10 @@ export function MigrasiDataForm() {
         </Card>
 
         {/* RIGHT COLUMN: PRATINJAU DATA */}
-        <div className="lg:col-span-7 p-4 sm:p-5 lg:p-6 rounded-2xl border border-border bg-card shadow-sm flex flex-col justify-between space-y-3 sm:space-y-4 overflow-hidden">
+        <div className="lg:col-span-7 min-w-0 w-full lg:h-0 lg:min-h-full p-4 sm:p-5 lg:p-6 rounded-2xl border border-border bg-card shadow-sm flex flex-col gap-3 sm:gap-4 overflow-hidden">
           {fileName && parsedData.length > 0 ? (
-            <div className="space-y-3 sm:space-y-3.5 flex-1 flex flex-col min-h-0">
-              <div className="flex items-center justify-between shrink-0">
+            <div className="gap-3 sm:gap-3.5 flex flex-col min-h-0 min-w-0 lg:flex-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div>
                   <h3 className="text-base font-bold text-foreground">Pratinjau Data Berkas</h3>
                   <p className="text-xs text-muted-foreground">
@@ -702,18 +723,14 @@ export function MigrasiDataForm() {
                 </button>
               </div>
 
-              {/* File Info Badge Banner */}
-              <div className="flex items-center justify-between p-2 sm:p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium shrink-0">
-                <span className="flex items-center gap-2 truncate font-mono text-[11px]">
-                  {isPdf ? (
-                    <FileText className="h-4 w-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0" />
-                  )}
-                  {fileName} (Total {totalRows} Siswa Teridentifikasi)
+              {/* File Info */}
+              <div className="flex items-center justify-between gap-2 text-xs shrink-0">
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
+                  {fileName}
                 </span>
-                <Badge variant="outline" className="bg-emerald-600 text-white text-[10px] font-bold border-0 shrink-0">
-                  Format Valid
+                <Badge variant="secondary">
+                  Total: {totalRows} siswa
+                  <BadgeCheck data-icon="inline-end" className="text-blue-500 dark:text-blue-400" />
                 </Badge>
               </div>
 
@@ -775,19 +792,21 @@ export function MigrasiDataForm() {
 
               {/* Table Preview */}
               {showPreview ? (
-                <div className="rounded-xl border border-border bg-background overflow-hidden max-h-[190px] sm:max-h-[220px] overflow-y-auto flex-1 min-h-[120px]">
-                  <Table>
-                    <Table.ScrollContainer>
+                <div className="rounded-xl border border-border bg-background overflow-hidden min-w-0 min-h-0 lg:flex-1">
+                  <Table className="w-full p-0 lg:h-full">
+                    <Table.ScrollContainer
+                      key={safeCurrentPage}
+                      className="max-h-[360px] lg:h-full lg:max-h-none overflow-x-auto overflow-y-scroll overscroll-contain [scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:var(--muted-foreground)_var(--muted)] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-muted [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/50"
+                    >
                       <Table.Content aria-label="Pratinjau Berkas" className="min-w-[480px]">
-                        <Table.Header>
+                        <Table.Header className="sticky top-0 z-10 bg-muted">
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">No</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">Identitas (NISN / NIS)</Table.Column>
                           <Table.Column isRowHeader className="text-foreground font-bold text-xs p-2.5">Nama Lengkap Siswa</Table.Column>
                           <Table.Column className="text-foreground font-bold text-xs p-2.5">L/P</Table.Column>
-                          <Table.Column className="text-foreground font-bold text-xs p-2.5">Status</Table.Column>
                         </Table.Header>
                         <Table.Body>
-                          {parsedData.slice(0, 5).map((row) => {
+                          {paginatedData.map((row) => {
                             const isDuplicate = validationResult.rejectedStudents.some(
                               (r) => r.noAbs === row.noAbs && r.reason.includes("duplikat")
                             )
@@ -809,25 +828,10 @@ export function MigrasiDataForm() {
                                         ID Duplikat
                                       </Badge>
                                     )}
-                                    {!isEmptyId && !isDuplicate && row.identityType === "NISN" && (
-                                      <Badge variant="outline" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 text-[9px] px-1 py-0 font-semibold">
-                                        NISN
-                                      </Badge>
-                                    )}
-                                    {!isEmptyId && !isDuplicate && row.identityType === "NIS" && (
-                                      <Badge variant="outline" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[9px] px-1 py-0 font-semibold">
-                                        No. Induk
-                                      </Badge>
-                                    )}
                                   </div>
                                 </Table.Cell>
                                 <Table.Cell className="text-xs font-semibold text-foreground p-2.5">{row.nama}</Table.Cell>
                                 <Table.Cell className="text-xs text-foreground p-2.5">{row.gender}</Table.Cell>
-                                <Table.Cell className="text-xs p-2.5">
-                                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px] font-semibold">
-                                    {row.status}
-                                  </Badge>
-                                </Table.Cell>
                               </Table.Row>
                             )
                           })}
@@ -868,17 +872,58 @@ export function MigrasiDataForm() {
             </div>
           )}
 
-          {/* Footer Info Tip */}
-          <div className="flex items-center gap-2 pt-2.5 border-t border-border text-[11px] text-muted-foreground shrink-0">
-            <Info className="h-3.5 w-3.5 text-[#4274D9] shrink-0" />
-            {fileName && parsedData.length > 0 ? (
-              <span>
-                Menampilkan {Math.min(5, parsedData.length)} dari {totalRows} baris siswa terdeteksi dari berkas <strong>{fileName}</strong>
-                {validationResult.totalRejected > 0 ? ` (${validationResult.totalRejected} identitas tidak valid/duplikat)` : ""}
-                {skippedRows.length > 0 ? ` (${skippedRows.length} baris dilewati saat parsing)` : ""}.
-              </span>
-            ) : (
-              <span>Unggah berkas untuk melihat pratinjau</span>
+          {/* Footer Info Tip & Pagination */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2.5 border-t border-border text-xs text-muted-foreground shrink-0">
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <Info className="h-3.5 w-3.5 text-[#4274D9] shrink-0" />
+              {fileName && parsedData.length > 0 ? (
+                <span>
+                  Menampilkan {startIndex + 1} - {Math.min(startIndex + itemsPerPage, parsedData.length)} dari {totalRows} siswa terdeteksi
+                </span>
+              ) : (
+                <span>Unggah berkas untuk melihat pratinjau</span>
+              )}
+            </div>
+            {fileName && parsedData.length > 0 && totalPages > 1 && (
+              <Pagination className="justify-center sm:justify-end mx-0 w-auto">
+                <PaginationContent className="flex-wrap justify-center">
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        if (safeCurrentPage > 1) setCurrentPage(safeCurrentPage - 1)
+                      }}
+                      className={safeCurrentPage <= 1 ? "pointer-events-none opacity-50 cursor-not-allowed" : "cursor-pointer"}
+                    />
+                  </PaginationItem>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                    <PaginationItem key={page}>
+                      <PaginationLink
+                        href="#"
+                        isActive={page === safeCurrentPage}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          setCurrentPage(page)
+                        }}
+                        className="cursor-pointer font-medium"
+                      >
+                        {page}
+                      </PaginationLink>
+                    </PaginationItem>
+                  ))}
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        if (safeCurrentPage < totalPages) setCurrentPage(safeCurrentPage + 1)
+                      }}
+                      className={safeCurrentPage >= totalPages ? "pointer-events-none opacity-50 cursor-not-allowed" : "cursor-pointer"}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
             )}
           </div>
         </div>
